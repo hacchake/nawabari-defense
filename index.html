@@ -1451,7 +1451,12 @@ const I18N_EN = {
   "秒保つと決着(いちばん広い人の勝ち)": "s to finish (most turf wins)",
   "%を": "% for ",
   "届くと総攻撃。buddy がかじるので、なかなか決着しない": "Reaching it triggers an all-out attack. Hard to finish",
-  "食い破る!": "breaks free!"
+  "食い破る!": "breaks free!",
+  "タワー": "Towers",
+  "撃つ: ": "Target: ",
+  "タワーは建たない。ふつうのナワバリバトル": "No towers. Classic turf battle",
+  "タワーなしのときは来ない": "Off when towers are off",
+  "秒後から、陣地をかじる buddy 18種が1体ずつ来る": "s in, 18 buddies come one of each to chew turf"
 };
 const I18N_RULES = [
   [/ラスト(\d+)秒!/g, 'Last $1 seconds!'],
@@ -3564,7 +3569,9 @@ function qixPlaceAt(q, c) {
 function fillByQix() { return settings.fillRule === 'QIX' && settings.numerin !== 'OFF'; }
 const FILL_LABEL = { SMALL: '狭いほう', QIX: 'ヌメリンのいない側' };
 const RULE_LABEL = { ENDLESS: '無制限', TIME: '時間制', STOCK: '残機制' };
-const TARGET_LABEL = { FIGHTERS: 'ファイターだけ', ALL: 'ファイター+じゃま役' };
+const TARGET_LABEL = { FIGHTERS: 'ファイターだけ', ALL: 'ファイター+じゃま役', OFF: 'なし' };
+// タワー OFF: タワーは建たず、侵略ウェーブも来ない(ふつうのナワバリバトル)
+function towersOn() { return settings.towerTarget !== 'OFF'; }
 // ナワバリバトルの邪魔役: 対戦の設定で ON / OFF(タイトルの背景にはいつも出す)
 function numerinOn() { return !hasRivals() || state === 'title' || settings.numerin !== 'OFF'; }
 function bachikkoOn() { return !hasRivals() || settings.bachikko !== 'OFF'; }
@@ -4494,7 +4501,7 @@ const MATCH_ITEMS = [
   { k:'numerin',   label:'ヌメリン(クラゲ)', vals:['ON', 'OFF'] },
   { k:'bachikko',  label:'バチッコ(火の玉)', vals:['ON', 'OFF'] },
   { k:'fillRule',  label:'塗れる側',       vals:['SMALL', 'QIX'] },
-  { k:'towerTarget', label:'タワーが撃つ相手', vals:['FIGHTERS', 'ALL'] },
+  { k:'towerTarget', label:'タワー', vals:['FIGHTERS', 'ALL', 'OFF'] },
   { k:'invasion',  label:'侵略ウェーブ',     vals:['ON', 'OFF'] },
   { k:'_keys',     label:'キーコンフィグ' },
   { k:'_back',     label:'もどる' },
@@ -4599,7 +4606,7 @@ const VSSET_ITEMS = [
   { k:'cpuLv',    label:'CPUの強さ' },
   { k:'_enemy',   label:'じゃま役' },                // ヌメリン・バチッコの ON / OFF
   { k:'fillRule', label:'塗れる側' },                // ヌメリンがいるときだけ: 狭いほう / ヌメリンのいない側
-  { k:'towerTarget', label:'タワーが撃つ' },         // ファイターだけ / ファイター+じゃま役
+  { k:'towerTarget', label:'タワー' },               // ファイターだけ撃つ / ファイター+じゃま役 / なし
   { k:'invasion', label:'侵略ウェーブ' },            // インクイの群れ ON / OFF
   { k:'_start',   label:'スタート' },
 ];
@@ -4618,8 +4625,8 @@ function vsSetDo(i, dir) {
   else if (it.k === 'vsCpu') cyc('vsCpu', ['AUTO', '1', '2', '3', '4', '5', '6', '7']);
   else if (it.k === 'cpuLv') cyc('cpuLv', ['AUTO'].concat(CPU_LV));
   else if (it.k === 'fillRule') { if (settings.numerin === 'OFF') return; cyc('fillRule', ['SMALL', 'QIX']); }
-  else if (it.k === 'towerTarget') cyc('towerTarget', ['FIGHTERS', 'ALL']);
-  else if (it.k === 'invasion') cyc('invasion', ['ON', 'OFF']);
+  else if (it.k === 'towerTarget') cyc('towerTarget', ['FIGHTERS', 'ALL', 'OFF']);
+  else if (it.k === 'invasion') { if (!towersOn()) return; cyc('invasion', ['ON', 'OFF']); }
   else if (it.k === '_enemy') { const e = ENEMY_SETS[(enemySetIdx() + dir + ENEMY_SETS.length) % ENEMY_SETS.length]; settings.numerin = e[0]; settings.bachikko = e[1]; }
   Snd.blip(); saveSettings();
 }
@@ -4649,8 +4656,8 @@ function drawVsSetup(t) {
     else if (it.k === '_amount' && settings.vsRule === 'ENDLESS') { label = '決着'; v = ENDLESS_TARGET + '%を' + ENDLESS_HOLD + '秒'; sub = '届くと総攻撃。buddy がかじるので、なかなか決着しない'; }
     else if (it.k === '_amount') { if (settings.vsRule === 'STOCK') { label = '残機'; v = vsStock() + '機'; sub = 'CPUも同じ数'; } else { label = '試合時間'; v = matchTime() + '秒'; } }
     else if (it.k === 'vsCpu') { v = settings.vsCpu === 'AUTO' ? 'AUTO' : settings.vsCpu + '人'; sub = settings.vsCpu === 'AUTO' ? '3人から、2ラウンドごとに1人ずつ増える(7人まで)' : ''; }
-    else if (it.k === 'invasion') { v = settings.invasion === 'OFF' ? 'OFF' : 'ON'; sub = settings.invasion === 'OFF' ? '侵略者は来ない' : WAVE_FIRST + '秒後から' + WAVE_EVERY + '秒ごとに、陣地をかじる buddy 18種の群れが来る'; }
-    else if (it.k === 'towerTarget') { v = TARGET_LABEL[settings.towerTarget] || TARGET_LABEL.FIGHTERS; sub = settings.towerTarget === 'ALL' ? 'ヌメリンはしびれて止まり、バチッコは消える' : '相手のファイターだけを撃つ'; }
+    else if (it.k === 'invasion') { if (!towersOn()) { v = 'OFF'; sub = 'タワーなしのときは来ない'; } else { v = settings.invasion === 'OFF' ? 'OFF' : 'ON'; sub = settings.invasion === 'OFF' ? '侵略者は来ない' : WAVE_FIRST + '秒後から、陣地をかじる buddy 18種が1体ずつ来る'; } }
+    else if (it.k === 'towerTarget') { v = !towersOn() ? 'なし' : '撃つ: ' + (TARGET_LABEL[settings.towerTarget] || TARGET_LABEL.FIGHTERS); sub = !towersOn() ? 'タワーは建たない。ふつうのナワバリバトル' : settings.towerTarget === 'ALL' ? 'ヌメリンはしびれて止まり、バチッコは消える' : '相手のファイターだけを撃つ'; }
     else if (it.k === 'fillRule') {
       if (settings.numerin === 'OFF') { v = '狭いほう'; sub = 'ヌメリンがいないときは、いつも狭いほう'; }
       else { v = FILL_LABEL[settings.fillRule] || '狭いほう'; sub = settings.fillRule === 'QIX' ? 'ヌメリンを小さく閉じこめれば、広いほうを一気に取れる' : '囲むと狭いほうが塗れる(一発決着なし)'; }
@@ -6564,7 +6571,7 @@ function ownerOf(own) { return own === 1 ? null : rivals[own - 2] || null; }
 
 // 陣地を取ったとき: 広さに応じたタワーを、その陣地のいちばん奥に建てる
 function buildTowerFor(cells, own, team) {
-  if (!isVS() || !cells.length || !initOpen || state !== 'play') return null;
+  if (!isVS() || !towersOn() || !cells.length || !initOpen || state !== 'play') return null;
   const lv = towerTier(cells.length / initOpen * 100);
   if (lv < 0) return null;
   const inside = new Uint8Array(surf.N);
@@ -7164,7 +7171,7 @@ const INV_TYPES = {
 };
 let invaders = [], waveT = WAVE_FIRST, waveN = 0, waveSpawns = null, invShots = [];
 function invaderNear(c, d) { return invaders.some(v => cellDist(v.c, c) < d * towerScale()); }
-function invasionOn() { return isVS() && settings.invasion !== 'OFF'; }
+function invasionOn() { return isVS() && settings.invasion !== 'OFF' && towersOn(); }
 function invSpeed() { return 5.2 * towerScale(); }                // マス/秒(種類の倍率をかける)
 function invHpBase() { return 30 + waveN * 10; }             // 1体ずつなので、群れだったころの4倍ほどの体力
 function invDef(v) { return INV_TYPES[v.k] || INV_TYPES.duck; }

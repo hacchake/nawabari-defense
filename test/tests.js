@@ -1839,6 +1839,7 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   let err = null; try { invaders = []; let i = 0; for (const k in INV_TYPES) invaders.push(makeInvader(k, cells[(i++ * 7) % cells.length])); render(); } catch (e) { err = e.stack; }
   assert('18種の描画', !err, err);
   { let oc = -1; for (let i = 0; i < surf.N && oc < 0; i++) if (grid[i] === OPEN && [0,1,2,3,4,5,6,7].every(m => surf.nb8[i * 8 + m] >= 0 && grid[surf.nb8[i * 8 + m]] === OPEN)) oc = i; player.drawing = false; player.c = oc; snapPlayerToBoundary(); assert('足もとが空き地でも、一番近い線へ戻れる', isBoundary(player.c), player.c); }
+  settings.towerTarget = 'OFF'; { const n0 = towers.length; assert('タワー OFF: 建たず、侵略ウェーブも来ない', buildTowerFor(cells, 1, 0) === null && towers.length === n0 && !invasionOn()); } settings.towerTarget = 'FIGHTERS';
   settings.vsRule = 'TIME'; settings.stageSel = 'TOUR'; settings.vsCpu = 'AUTO'; invaders = [];
 }
 
