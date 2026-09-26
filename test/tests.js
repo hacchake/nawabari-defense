@@ -1745,7 +1745,7 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   settings.stageSel = 'TOUR'; settings.vsCpu = 'AUTO';
 }
 
-// ---- 119) 侵略ウェーブ(インクイ) ----
+// ---- 119) 侵略ウェーブ(buddy 18種) ----
 {
   const openN = () => { let n = 0; for (let i = 0; i < surf.N; i++) if (grid[i] === OPEN) n++; return n; };
   for (const sk of ['PLANE', 'CUBE']) {
@@ -1757,25 +1757,25 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
     for (let i = 0; i < 60 * (WAVE_FIRST - WAVE_WARN) + 30; i++) { blinkT += 1 / 60; updateInvaders(1 / 60); }
     assert(sk + ': ウェーブの前ぶれ(出てくる場所)', !!waveSpawns && waveSpawns.length > 0 && invaders.length === 0);
     for (let i = 0; i < 60 * 3; i++) { blinkT += 1 / 60; updateInvaders(1 / 60); }
-    assert(sk + ': ウェーブ1でインクイが来る', waveN === 1 && invaders.length >= 5 && invaders.every(v => grid[v.c] === OPEN || grid[v.c] === TRAIL), invaders.length);
+    assert(sk + ': ウェーブ1で侵略 buddyが来る', waveN === 1 && invaders.length >= 5 && invaders.every(v => grid[v.c] === OPEN || grid[v.c] === TRAIL), invaders.length);
     const a0 = playerArea();
     let err = null;
     try { for (let i = 0; i < 60 * 60 && playerArea() >= a0; i++) { blinkT += 1 / 60; updateInvaders(1 / 60); } render(); } catch (e) { err = e.stack; }
-    assert(sk + ': インクイが陣地をかじる(タワーがないと減る)', !err && playerArea() < a0, err || (a0 + '→' + playerArea()));
+    assert(sk + ': 侵略 buddyが陣地をかじる(タワーがないと減る)', !err && playerArea() < a0, err || (a0 + '→' + playerArea()));
     assert(sk + ': かじっても占領数の整合がくずれない', claimed === initOpen - openN() - trail.length - rivalTrailCells(), claimed + ' vs ' + (initOpen - openN()));
-    // タワーはインクイを撃つ(設定が「ファイターだけ」でも)
+    // タワーは侵略 buddyを撃つ(設定が「ファイターだけ」でも)
     settings.towerTarget = 'FIGHTERS';
     const T = buildTowerFor(cells.filter(c => grid[c] === WALL), 1, 0); T.build = BUILD_T;
-    const v = invaders[0]; v.c = surf.nb[T.c * 4] >= 0 ? T.c : T.c;
-    assert(sk + ': タワーはインクイをねらう', towerEnemies(T).some(tg => tg.type === 'i'));
+    const v = invaders[0]; v.k = 'duck'; v.shield = 0; v.nap = 0;
+    assert(sk + ': タワーは侵略 buddyをねらう', towerEnemies(T).some(tg => tg.type === 'i'));
     const hurt0 = v.hp; hurtTarget({ type: 'i', ref: v }, 1, T);
-    assert(sk + ': 撃たれるとインクイの体力が減る', v.hp === hurt0 - 1);
+    assert(sk + ': 撃たれると侵略 buddyの体力が減る', v.hp === hurt0 - 1);
     hurtTarget({ type: 'i', ref: v }, 99, T);
     assert(sk + ': 体力が0で退治', !invaders.includes(v));
     // 空き地ごと囲むと退治
-    const w = invaders[0]; grid[w.c] = WALL; ownA[w.c] = 1; colA[w.c] = teamNo(0); claimed++; const k0 = vsStat.repel || 0;
+    const w = invaders[0]; w.k = 'duck'; w.chew = 0; grid[w.c] = WALL; ownA[w.c] = 1; colA[w.c] = teamNo(0); claimed++; const k0 = vsStat.repel || 0;
     crushInvaders(1);
-    assert(sk + ': 囲まれたインクイは退治(自分の手柄)', !invaders.includes(w) && (vsStat.repel || 0) === k0 + 1);
+    assert(sk + ': 囲まれた侵略 buddyは退治(自分の手柄)', !invaders.includes(w) && (vsStat.repel || 0) === k0 + 1);
     // 描きかけの線を踏まれるとやられる
     player.invuln = 0; deathTimer = 0;
     const x = invaders[0];
@@ -1785,7 +1785,7 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
         const in0 = invNext; invNext = vv => vv === x ? n : in0(vv);
         for (let i = 0; i < 30 && deathTimer <= 0 && x.c !== n; i++) updateInvaders(1 / 60);
         invNext = in0;
-        assert(sk + ': インクイに描きかけの線を踏まれるとやられる', deathTimer > 0 && /インクイ/.test(lastDeath), lastDeath);
+        assert(sk + ': 侵略 buddy に描きかけの線を踏まれるとやられる', deathTimer > 0 && /線を踏まれた/.test(lastDeath), lastDeath);
         while (deathTimer > 0) update(1 / 60);
       }
     }
@@ -1794,6 +1794,49 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   for (let i = 0; i < 60 * (WAVE_FIRST + 2); i++) { blinkT += 1 / 60; updateInvaders(1 / 60); }
   assert('侵略ウェーブ OFF なら来ない', invaders.length === 0 && waveN === 0);
   settings.invasion = 'ON'; settings.stageSel = 'TOUR'; settings.vsCpu = 'AUTO';
+}
+
+// ---- 120) buddy 18種の特技・無制限ルール ----
+{
+  assert('侵略 buddy は18種(絵もある)', Object.keys(INV_TYPES).length === 18 && typeof drawBuddy === 'function');
+  settings.mode = 'VS'; settings.stageSel = 'PLANE'; settings.vsCpu = '3'; settings.invasion = 'ON'; settings.vsRule = 'ENDLESS'; startGame(); setState('play');
+  assert('無制限: 80%に届いた瞬間には終わらない', matchTarget() > 100);
+  const vt = vsT; for (let i = 0; i < 60 * 3; i++) update(1 / 60);
+  assert('無制限: 時間切れで終わらない', vsT === vt && vsElapsed > 2.5 && (state === 'play' || state === 'pause' || deathTimer > 0));
+  player.invuln = 1e9; for (const r of rivals) r.dead = 1e9;
+  const cells = []; for (let i = 0; i < surf.N && cells.length < initOpen * 0.2; i++) if (grid[i] === OPEN && !nearQix(i, 6)) { grid[i] = WALL; ownA[i] = 1; colA[i] = teamNo(0); cells.push(i); }
+  claimed += cells.length; recountAreas();
+  const T = buildTowerFor(cells, 1, 0); T.build = BUILD_T;
+  const at = c => { const u = makeInvader('duck', c); return u; };
+  const open = cells.map(c => [0, 1, 2, 3].map(k => surf.nb[c * 4 + k])).flat().find(n => n >= 0 && grid[n] === OPEN);
+  // ロボ: バリアで最初の3発を防ぐ
+  const rb = makeInvader('robot', open); invaders.push(rb); const h0 = rb.hp;
+  for (let i = 0; i < 3; i++) hurtInvader(rb, 1, 1);
+  assert('ロボ: バリアで3発防ぐ', rb.hp === h0 && rb.shield === 0); hurtInvader(rb, 1, 1); assert('ロボ: バリアがなくなると減る', rb.hp < h0);
+  // カメ: 甲羅でダメージ半分
+  const tu = makeInvader('turtle', open); const t0 = tu.hp; hurtInvader(tu, 2, 1); assert('カメ: ダメージ半分', Math.abs(t0 - tu.hp - 1) < 1e-6);
+  // ブロブ: 倒すと2匹に分裂
+  invaders = []; const bl = makeInvader('blob', open); invaders.push(bl); killInvader(bl, 1);
+  assert('ブロブ: 倒すと2匹に分裂(小さい方はもう分裂しない)', invaders.length === 2 && invaders.every(u => u.small));
+  // フクロウ: 陣地の上を飛ぶ(囲まれても退治されない)
+  invaders = []; const ow = makeInvader('owl', cells[5]); invaders.push(ow); crushInvaders(1);
+  assert('フクロウ: 飛んでいるので囲まれても退治されない', invaders.includes(ow));
+  // キノコ: まわりの陣地を腐らせる / タコ: 墨で穴
+  invaders = []; const mu = makeInvader('mushroom', open); invaders.push(mu); const a0 = playerArea(); invAbility(mu, INV_TYPES.mushroom); afterChew();
+  assert('キノコ: まわりの陣地を腐らせる', playerArea() < a0);
+  const oc = makeInvader('octopus', open); invaders.push(oc); invAbility(oc, INV_TYPES.octopus);
+  const a1 = playerArea(); for (let i = 0; i < 60; i++) updateInvaders(1 / 60); afterChew();
+  assert('タコ: 墨を飛ばして陣地に穴', playerArea() < a1);
+  // ドラゴン: 火の玉でタワーを焼く
+  const dr = makeInvader('dragon', T.c); invaders.push(dr); T.hp = towerHpMax(T); invAbility(dr, INV_TYPES.dragon);
+  for (let i = 0; i < 60; i++) updateInvaders(1 / 60);
+  assert('ドラゴン: 火の玉でタワーを焼く', T.hp < towerHpMax(T) || !towers.includes(T));
+  // 5回に1回はドラゴン、後のウェーブほどレア度の高い種
+  waveN = 4; assert('5回目のウェーブはドラゴンが先頭', waveKinds(5)[0] === 'dragon');
+  waveN = 0; assert('最初のウェーブはレア度1の種だけ', waveKinds(30).every(k => INV_TYPES[k].rar <= 1));
+  let err = null; try { invaders = []; let i = 0; for (const k in INV_TYPES) invaders.push(makeInvader(k, cells[(i++ * 7) % cells.length])); render(); } catch (e) { err = e.stack; }
+  assert('18種の描画', !err, err);
+  settings.vsRule = 'TIME'; settings.stageSel = 'TOUR'; settings.vsCpu = 'AUTO'; invaders = [];
 }
 
 console.log(fails === 0 ? '\n=== 全テスト合格 ===' : '\n=== 失敗 ' + fails + ' 件 ===');

@@ -11,7 +11,7 @@ let problems = [], frames = 0;
 function countOpen(){ let n=0; for (let i=0;i<surf.N;i++) if (grid[i]===OPEN) n++; return n; }
 for (const md of (globalThis.FUZZ_MODES || ['VS','VS','VS','VS','PLANE','CUBE','SPHERE','GSD','KLEIN','MOBIUS','KNOT','TORUS','TRUNC_ICOSA'])) {
   settings.mode = md;
-  settings.vsRule = md === 'VS' && Math.random() < 0.5 ? 'STOCK' : 'TIME';
+  settings.vsRule = md === 'VS' ? pick(['STOCK', 'TIME', 'ENDLESS']) : 'TIME';
   settings.numerin = md === 'VS' && Math.random() < 0.4 ? 'OFF' : 'ON'; settings.bachikko = md === 'VS' && Math.random() < 0.4 ? 'OFF' : 'ON'; settings.fillRule = Math.random() < 0.5 ? 'QIX' : 'SMALL';   // じゃま役の ON / OFF も   // ナワバリバトルは時間制と残機制を両方ためす
   for (let game = 0; game < 2; game++) {
     startGame(); stTimer = 2; tickMeta(0.016);
