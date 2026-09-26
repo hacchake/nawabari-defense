@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>NAWABARI ─ ナワバリバトル</title>
-<meta name="description" content="線で囲んで陣地を広げるナワバリバトル。CPUと全員敵同士で、平面・多面体・球・クラインの壺の表面を塗りあおう。">
-<meta property="og:title" content="NAWABARI ─ ナワバリバトル">
-<meta property="og:description" content="CPUと陣地を塗りあう対戦ゲーム。ブラウザだけで遊べます。">
+<title>NAWABARI DEFENSE ─ ナワバリディフェンス</title>
+<meta name="description" content="線で囲んで陣地を広げると、広さに応じたタワーが建って侵入者を撃つ。ナワバリ取りとタワーディフェンスの対戦ゲーム。">
+<meta property="og:title" content="NAWABARI DEFENSE ─ ナワバリディフェンス">
+<meta property="og:description" content="陣地を取るとタワーが建つ、ナワバリ取り × タワーディフェンス。ブラウザだけで遊べます。">
 <meta name="theme-color" content="#05060d">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -726,9 +726,9 @@ const vadd   = (a, b, k) => [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k];
 function vnorm(a) { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }
 
 /* ---------------- 設定と保存(localStorage不可なら内部保持) ---------------- */
-// 保存場所は QLAIM 1・2 と分ける(同じ github.io の下なので、キーの頭を nawabari. にする)
+// 保存場所は QLAIM 1・2・ナワバリバトルと分ける(同じ github.io の下なので、キーの頭を nwdef. にする)
 const store = (() => {
-  const mem = {}, ns = k => k.replace(/^qlaim\./, 'nawabari.');
+  const mem = {}, ns = k => k.replace(/^qlaim\./, 'nwdef.');
   return {
     get(k, d) {
       k = ns(k);
@@ -1366,7 +1366,9 @@ const I18N_EN = {
   "ビッグ!": "BIG!",
   "バトル": "Battle",
   "ネオン": "Neon",
-  "まつり": "Matsuri"
+  "まつり": "Matsuri",
+  "ナワバリディフェンス": "Turf Defense",
+  "囲んでタワーを建て、ナワバリを守れ!": "Enclose, build towers, defend your turf!"
 };
 const I18N_RULES = [
   [/ラスト(\d+)秒!/g, 'Last $1 seconds!'],
@@ -1421,7 +1423,7 @@ setTimeout(() => applyLang(), 0);
 function applyLang() {
   try {
     const en = isEn();
-    document.title = en ? 'NAWABARI ─ Turf Battle' : 'NAWABARI ─ ナワバリバトル';
+    document.title = en ? 'NAWABARI DEFENSE ─ Turf Defense' : 'NAWABARI DEFENSE ─ ナワバリディフェンス';
     if (document.documentElement) document.documentElement.lang = en ? 'en' : 'ja';
     const bv = document.getElementById('b-view'), bf = document.getElementById('b-fast');
     if (bv && 'innerHTML' in bv) bv.innerHTML = en ? 'VIEW<br><small>all</small>' : '全体<br><small>みる</small>';
@@ -4519,7 +4521,7 @@ function vsSetDo(i, dir) {
 function drawVsSetup(t) {
   panel(50, 120, W - 100, 610);
   ctx.textAlign = 'center'; ctx.fillStyle = '#ffd76b'; ctx.font = "bold 26px 'Courier New', monospace";
-  ctx.fillText('ナワバリバトル', W / 2, 166);
+  ctx.fillText('ナワバリディフェンス', W / 2, 166);
   ctx.fillStyle = '#aab6dd'; ctx.font = "bold 13px 'Courier New', monospace";
   ctx.fillText('全員敵同士。いちばん広い陣地を取れ!', W / 2, 190);
   vsRects = [];
@@ -7063,13 +7065,16 @@ function renderOverlay() {
   if (state === 'title') {
     panel(56, 130, W - 112, 530);
     ctx.fillStyle = t.accent;
-    ctx.font = "bold 62px 'Courier New', monospace";
-    ctx.fillText('NAWABARI', W / 2 + 3, 226 + 3);
+    ctx.font = "bold 58px 'Courier New', monospace";
+    ctx.fillText('NAWABARI', W / 2 + 3, 218 + 3);
     ctx.fillStyle = '#ffffff';
-    ctx.fillText('NAWABARI', W / 2, 226);
+    ctx.fillText('NAWABARI', W / 2, 218);
+    ctx.fillStyle = '#ff8a3d';
+    ctx.font = "bold 30px 'Courier New', monospace";
+    ctx.fillText('D E F E N S E', W / 2, 256);
     ctx.fillStyle = '#8fa3d9';
-    ctx.font = "bold 20px sans-serif";
-    ctx.fillText('ナ ワ バ リ', W / 2, 262);
+    ctx.font = "bold 18px sans-serif";
+    ctx.fillText('ナワバリディフェンス', W / 2, 286);
     // Clawd がタイトルの上を行ったり来たり
     {
       const ph = blinkT * 0.7, x = W / 2 + Math.sin(ph) * 150;
@@ -7079,7 +7084,7 @@ function renderOverlay() {
 
     ctx.font = "bold 16px sans-serif";
     ctx.fillStyle = '#cdd8ff';
-    ctx.fillText('線で囲んで、ナワバリを広げろ!', W / 2, 330);
+    ctx.fillText('囲んでタワーを建て、ナワバリを守れ!', W / 2, 336);
 
     if (blinkOn) {
       ctx.fillStyle = '#ffd76b';
