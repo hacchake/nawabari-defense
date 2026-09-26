@@ -1645,5 +1645,67 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   settings.theme = th0; settings.stageSel = 'TOUR'; player.usedFast = false;
 }
 
+// ---- 117) タワー(ナワバリディフェンス) ----
+{
+  assert('広さで7段階', TOWERS.length === 7 && towerTier(0.3) === -1 && towerTier(0.6) === 0 && towerTier(4) === 2 && towerTier(9) === 4 && towerTier(30) === 6);
+  settings.mode = 'VS'; settings.stageSel = 'PLANE'; settings.vsCpu = '3'; settings.towerTarget = 'FIGHTERS'; startGame(); setState('play');
+  sparxes = []; player.invuln = 99;
+  // 自機の陣地を作ってタワーを建てる(盤面の6%)
+  const cells = []; for (let y = 60; y < GH - 30 && cells.length < initOpen * 0.06; y++) for (let x = 20; x < 60; x++) { const c = idx(x, y); if (grid[c] === OPEN) { grid[c] = WALL; ownA[c] = 1; colA[c] = teamNo(0); cells.push(c); } }
+  claimed += cells.length; recountAreas();
+  const T = buildTowerFor(cells, 1, 0);
+  assert('陣地を取るとタワー(6% → 迫撃砲)', T && T.lv === 3 && towers.length === 1 && cells.includes(T.c));
+  { const inR = new Set(cells), d = bfsDist([...Array(surf.N).keys()].filter(i => !inR.has(i))); assert('タワーは陣地の奥に建つ(ふちから3マス以上)', d[T.c] >= 3, d[T.c]); }
+  for (let i = 0; i < 60; i++) updateTowers(1 / 60);
+  assert('建設中は撃たない', T.build < BUILD_T && shots.length === 0);
+  for (let i = 0; i < 90; i++) updateTowers(1 / 60);
+  assert('建設が終わる', T.build >= BUILD_T);
+  // 射程の中に CPU を置くと撃つ → 体力が減る → 0 でやられる(持ち主の手柄)
+  const r = rivals[0]; r.inv = 0; r.c = T.c + 4; if (!surf.is3D) { r.fx = (r.c % GW) + 0.5; r.fy = ((r.c / GW) | 0) + 0.5; }
+  const k0 = vsStat.kills, d0 = r.downs;
+  T.lv = 0; T.cd = 0;                                 // 機銃にして確かめる
+  for (let i = 0; i < 60 * 6 && r.dead <= 0; i++) { updateTowers(1 / 60); r.c = T.c + 4; }
+  assert('射程に入った相手を撃って、体力が0でやられる', r.downs === d0 + 1 && r.dead > 0 && vsStat.kills === k0 + 1, r.hp + ' downs=' + r.downs);
+  assert('やられたあと体力はもどる', r.hp === FIGHTER_HP);
+  // 自分のチームは撃たない
+  assert('自分(同じチーム)はねらわない', !towerEnemies(T).some(tg => tg.type === 'p'));
+  // 体力の回復
+  const r2 = rivals[1]; r2.hp = 2; r2.hurtT = 0;
+  for (let i = 0; i < 60 * 6; i++) updateTowers(1 / 60);
+  assert('しばらく撃たれなければ体力が回復する', r2.hp > 4, r2.hp.toFixed(2));
+  // 陣地を上塗りされるとこわれる
+  ownA[T.c] = 2 + rivals[1].id; towerChkT = 0; updateTowers(1 / 60);
+  assert('タワーの下の陣地が相手のものになるとこわれる', towers.length === 0);
+  // ヌメリン・バチッコ
+  settings.towerTarget = 'ALL';
+  const T2 = buildTowerFor(cells, 1, 0); T2.build = BUILD_T; ownA[T2.c] = 1;
+  assert('設定「ファイター+じゃま役」ならヌメリンもねらう', towerEnemies(T2).some(tg => tg.type === 'q'));
+  hurtTarget({ type: 'q', ref: qixes[0] }, 1, T2);
+  assert('撃たれたヌメリンはしびれて止まる', qixes[0].stun > 0);
+  settings.towerTarget = 'FIGHTERS';
+  assert('設定「ファイターだけ」ならヌメリンはねらわない', !towerEnemies(T2).some(tg => tg.type === 'q'));
+  // 1人10基まで
+  towers = [];
+  for (let i = 0; i < TOWER_MAX + 3; i++) buildTowerFor(cells, 1, 0);
+  assert('1人10基まで(古いものから撤去)', towers.filter(q => q.own === 1).length === TOWER_MAX);
+  // 自機が撃たれる
+  towers = []; player.invuln = 0; deathTimer = 0;
+  const rc = []; for (let i = 0; i < surf.N && rc.length < initOpen * 0.02; i++) if (grid[i] === OPEN) { grid[i] = WALL; ownA[i] = 2 + rivals[0].id; colA[i] = teamNo(rivals[0].team); rc.push(i); }
+  const T3 = buildTowerFor(rc, 2 + rivals[0].id, rivals[0].team); T3.build = BUILD_T; T3.lv = 4; T3.cd = 0;
+  player.c = T3.c; player.hp = 1;
+  for (let i = 0; i < 60 && deathTimer <= 0; i++) updateTowers(1 / 60);
+  assert('相手のタワーに撃たれて自機がやられる', deathTimer > 0 && /撃たれた/.test(lastDeath), lastDeath);
+  while (deathTimer > 0) update(1 / 60);
+  // 描画(建設中・完成・弾)
+  let err = null;
+  try { towers = []; const a1 = buildTowerFor(cells, 1, 0); a1.build = BUILD_T * 0.5; for (let lv = 0; lv < 7; lv++) { const b = buildTowerFor(cells, 1, 0); b.lv = lv; b.build = BUILD_T; } render(); } catch (e) { err = e.stack; }
+  assert('タワー7種と建設中の描画', !err, err);
+  // 立体でも試合が進む(タワーつき)
+  settings.stageSel = 'CUBE'; startGame(); setState('play');
+  err = null; try { for (let i = 0; i < 60 * 30 && state === 'play'; i++) { blinkT += 1 / 60; update(1 / 60); if (deathTimer > 0) while (deathTimer > 0) update(1 / 60); if (i % 60 === 0) render(); } } catch (e) { err = e.stack; }
+  assert('立体でもタワーが建って試合が進む', !err && (towers.length > 0 || state !== 'play'), err || towers.length);
+  settings.stageSel = 'TOUR'; settings.vsCpu = 'AUTO';
+}
+
 console.log(fails === 0 ? '\n=== 全テスト合格 ===' : '\n=== 失敗 ' + fails + ' 件 ===');
 process.exit(fails === 0 ? 0 : 1);

@@ -745,7 +745,7 @@ const store = (() => {
 
 const settings = Object.assign(
   { bgm: 6, sfx: 7, diff: 'NORMAL', lives: CONFIG.LIVES, theme: THEMES.length, crt: true, mode: 'VS', music: 'AUTO', shake: true, glow: true, ink: 'MIX', claimSnd: 'MIX',
-    vsCpu: 'AUTO', cpuLv: 'AUTO', matchTime: 90, stageSel: 'TOUR', vsRule: 'TIME', vsStock: 3, stageSize: 'AUTO', numerin: 'ON', bachikko: 'ON', fillRule: 'SMALL',
+    vsCpu: 'AUTO', cpuLv: 'AUTO', matchTime: 90, stageSel: 'TOUR', vsRule: 'TIME', vsStock: 3, stageSize: 'AUTO', numerin: 'ON', bachikko: 'ON', fillRule: 'SMALL', towerTarget: 'FIGHTERS',
     lang: (typeof navigator !== 'undefined' && navigator.language && !/^ja/i.test(navigator.language)) ? 'EN' : 'JA' },
   store.get('qlaim.settings', {})
 );
@@ -1368,7 +1368,27 @@ const I18N_EN = {
   "ネオン": "Neon",
   "まつり": "Matsuri",
   "ナワバリディフェンス": "Turf Defense",
-  "囲んでタワーを建て、ナワバリを守れ!": "Enclose, build towers, defend your turf!"
+  "囲んでタワーを建て、ナワバリを守れ!": "Enclose, build towers, defend your turf!",
+  "機銃": "Machine gun",
+  "ツイン機銃": "Twin gun",
+  "ミサイルランチャー": "Missile launcher",
+  "迫撃砲": "Mortar",
+  "レーザー砲台": "Laser cannon",
+  "テスラコイル": "Tesla coil",
+  "要塞ミサイル": "Fortress missiles",
+  " 建設中…": " building...",
+  " 起動!": " online!",
+  " こわされた!": " destroyed!",
+  "に撃たれた": " got you",
+  "の": "'s ",
+  "タワーが撃つ相手": "Towers target",
+  "タワーが撃つ": "Towers target",
+  "ファイターだけ": "Fighters only",
+  "ファイター+じゃま役": "Fighters + hazards",
+  "ヌメリンはしびれて止まり、バチッコは消える": "Numerin gets stunned, Bachikko is destroyed",
+  "相手のファイターだけを撃つ": "Only shoots rival fighters",
+  "陣地を取ると広さに応じたタワーが建ち、近づいた相手を撃つ(7種類)": "Claiming turf builds a tower by size; it shoots intruders (7 types)",
+  "相手の描きかけの線に入るとたおせる。体力が0か、線をさわられるとやられる": "Cross a rival's line to KO them; 0 HP or a touched line and you're out"
 };
 const I18N_RULES = [
   [/ラスト(\d+)秒!/g, 'Last $1 seconds!'],
@@ -3351,6 +3371,7 @@ function initLevel(lv) {
   for (let i = 0; i < surf.N; i++) if (grid[i] === WALL) baseA[i] = 1;
   recountAreas();
 
+  towers = []; shots = []; player.hp = FIGHTER_HP; player.hurtT = 9;
   particles = []; floats = []; fxBanner = null; zoomPunch = null; fwQueue = []; slowMoT = 0;
   if (isVS()) lapseReset();                         // タイムラプスの最初の盤面
   deathTimer = 0; wasSplit = false; shakeT = 0;
@@ -3478,6 +3499,7 @@ function qixPlaceAt(q, c) {
 // 塗れる側: 'SMALL' = 狭いほう / 'QIX' = ヌメリンのいない側(ヌメリンを閉じこめれば広いほうも取れる)。ヌメリンがいるときだけ効く
 function fillByQix() { return settings.fillRule === 'QIX' && settings.numerin !== 'OFF'; }
 const FILL_LABEL = { SMALL: '狭いほう', QIX: 'ヌメリンのいない側' };
+const TARGET_LABEL = { FIGHTERS: 'ファイターだけ', ALL: 'ファイター+じゃま役' };
 // ナワバリバトルの邪魔役: 対戦の設定で ON / OFF(タイトルの背景にはいつも出す)
 function numerinOn() { return !hasRivals() || state === 'title' || settings.numerin !== 'OFF'; }
 function bachikkoOn() { return !hasRivals() || settings.bachikko !== 'OFF'; }
@@ -3792,6 +3814,7 @@ function closeTrail() {
   lastPat = pat;
   if (isVS()) {                                        // ナワバリバトル: コンボか大きく囲むと柄(色はチームのまま)
     claimFx(newCells.concat(trail), teamHex(0), true);
+    buildTowerFor(newCells, 1, 0);
     const tp = claimPattern(newCells, combo, player.c);
     noteWagara(tp);
     if (tp) { const P0 = playerScreen(); floats.push({ x: P0.x, y: P0.y - 40, txt: TEAM_PATS[tp], t: 1.4, col: teamHex(0) }); }
@@ -4138,6 +4161,7 @@ function qixBodyHits(q) {
 }
 function updateQixes(dt) {
   for (const q of qixes) {
+    if (q.stun > 0) { q.stun -= dt; continue; }        // タワーに撃たれて、しびれている
     updateQix(q, dt);
     if (deathTimer > 0) return;
   }
@@ -4272,7 +4296,7 @@ function updateRival3D(r, dt) {
   const spdOf = fast => (r.drawing ? (fast ? CONFIG.DRAW_FAST : CONFIG.DRAW_SLOW) : CONFIG.PLAYER_SPEED) * surf.def.speed;
   const q = qixes[0];
   if (r.drawing) r.drawT = (r.drawT || 0) + dt; else r.drawT = 0;
-  if (r.drawing && r.mode !== 'flee' && ((q && qixNear3(r.c, surf.def.arm + 3)) || r.drawT > 14)) rivalGoHome3D(r);
+  if (r.drawing && r.mode !== 'flee' && ((q && qixNear3(r.c, surf.def.arm + 3)) || r.drawT > 14 || r.hp <= 2)) rivalGoHome3D(r);
   if (!r.plan.length) {
     if (r.drawing) { rivalGoHome3D(r); if (!r.plan.length) { rivalFail(r, 'stuck'); return; } }
     else { r.think -= dt; if (r.think > 0) return; r.think = thinkTime(); planRival3D(r); if (!r.plan.length) return; }
@@ -4396,6 +4420,7 @@ const MATCH_ITEMS = [
   { k:'numerin',   label:'ヌメリン(クラゲ)', vals:['ON', 'OFF'] },
   { k:'bachikko',  label:'バチッコ(火の玉)', vals:['ON', 'OFF'] },
   { k:'fillRule',  label:'塗れる側',       vals:['SMALL', 'QIX'] },
+  { k:'towerTarget', label:'タワーが撃つ相手', vals:['FIGHTERS', 'ALL'] },
   { k:'_keys',     label:'キーコンフィグ' },
   { k:'_back',     label:'もどる' },
 ];
@@ -4430,6 +4455,7 @@ function drawMatchOpts(t) {
     else if (it.k === 'stageSize') v = stageSizeLabel(settings.stageSize || 'AUTO');
     else if (it.k === 'vsStock') v = vsStock() + '機';
     else if (it.k === 'fillRule') v = FILL_LABEL[settings.fillRule] || '狭いほう';
+    else if (it.k === 'towerTarget') v = TARGET_LABEL[settings.towerTarget] || TARGET_LABEL.FIGHTERS;
     else if (it.vals) v = String(settings[it.k]);
     if (v) ctx.fillText('◀ ' + v + ' ▶', W - 110, y + 2);
   });
@@ -4498,6 +4524,7 @@ const VSSET_ITEMS = [
   { k:'cpuLv',    label:'CPUの強さ' },
   { k:'_enemy',   label:'じゃま役' },                // ヌメリン・バチッコの ON / OFF
   { k:'fillRule', label:'塗れる側' },                // ヌメリンがいるときだけ: 狭いほう / ヌメリンのいない側
+  { k:'towerTarget', label:'タワーが撃つ' },         // ファイターだけ / ファイター+じゃま役
   { k:'_start',   label:'スタート' },
 ];
 let vsSel = VSSET_ITEMS.length - 1, vsRects = [];
@@ -4515,6 +4542,7 @@ function vsSetDo(i, dir) {
   else if (it.k === 'vsCpu') cyc('vsCpu', ['AUTO', '1', '2', '3', '4', '5', '6', '7']);
   else if (it.k === 'cpuLv') cyc('cpuLv', ['AUTO'].concat(CPU_LV));
   else if (it.k === 'fillRule') { if (settings.numerin === 'OFF') return; cyc('fillRule', ['SMALL', 'QIX']); }
+  else if (it.k === 'towerTarget') cyc('towerTarget', ['FIGHTERS', 'ALL']);
   else if (it.k === '_enemy') { const e = ENEMY_SETS[(enemySetIdx() + dir + ENEMY_SETS.length) % ENEMY_SETS.length]; settings.numerin = e[0]; settings.bachikko = e[1]; }
   Snd.blip(); saveSettings();
 }
@@ -4526,7 +4554,7 @@ function drawVsSetup(t) {
   ctx.fillText('全員敵同士。いちばん広い陣地を取れ!', W / 2, 190);
   vsRects = [];
   VSSET_ITEMS.forEach((it, i) => {
-    const y = 232 + i * 54, sel = i === vsSel;
+    const y = 226 + i * 49, sel = i === vsSel;
     if (it.k === '_start') {
       vsRects.push({ x: W / 2 - 130, y: y - 30, w: 260, h: 52, i });
       ctx.fillStyle = sel ? '#ffd76b' : '#8a7a3a'; ctx.fillRect(W / 2 - 130, y - 30, 260, 52);
@@ -4534,15 +4562,16 @@ function drawVsSetup(t) {
       ctx.fillText('スタート', W / 2, y + 4);
       return;
     }
-    vsRects.push({ x: 80, y: y - 30, w: W - 160, h: 56, i });
-    ctx.fillStyle = sel ? 'rgba(60,80,160,0.9)' : 'rgba(20,26,56,0.85)'; ctx.fillRect(80, y - 30, W - 160, 56);
-    if (sel) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.strokeRect(81, y - 29, W - 162, 54); }
+    vsRects.push({ x: 80, y: y - 26, w: W - 160, h: 46, i });
+    ctx.fillStyle = sel ? 'rgba(60,80,160,0.9)' : 'rgba(20,26,56,0.85)'; ctx.fillRect(80, y - 26, W - 160, 46);
+    if (sel) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.strokeRect(81, y - 25, W - 162, 44); }
     let label = it.label, v = '', sub = '';
     if (it.k === 'stageSel') { v = stageLabel(settings.stageSel); sub = settings.stageSel === 'TOUR' ? '平面 → 立方体 → 球 … とラウンドごとに進む' : settings.stageSel === 'RANDOM' ? 'ラウンドごとにランダム' : (CONFIG.SURF[settings.stageSel] || {}).sub || ''; }
     else if (it.k === 'stageSize') { const k2 = settings.stageSize || 'AUTO'; v = stageSizeLabel(k2); sub = k2 === 'AUTO' ? '人数が多いほど広く(いまの人数なら ' + STAGE_SIZES[(() => { const n = vsCpuCount(1) + 1; return n <= 4 ? 'M' : n <= 7 ? 'L' : 'XL'; })()].label + ')' : 'CPUが多いときは広いほうがすっきり'; }
     else if (it.k === 'vsRule') { v = settings.vsRule === 'STOCK' ? '残機制' : '時間制'; sub = settings.vsRule === 'STOCK' ? '時間なし。残機がなくなると脱落。最後まで残れ!' : '時間切れのとき、いちばん広い人の勝ち'; }
     else if (it.k === '_amount') { if (settings.vsRule === 'STOCK') { label = '残機'; v = vsStock() + '機'; sub = 'CPUも同じ数'; } else { label = '試合時間'; v = matchTime() + '秒'; } }
     else if (it.k === 'vsCpu') { v = settings.vsCpu === 'AUTO' ? 'AUTO' : settings.vsCpu + '人'; sub = settings.vsCpu === 'AUTO' ? '3人から、2ラウンドごとに1人ずつ増える(7人まで)' : ''; }
+    else if (it.k === 'towerTarget') { v = TARGET_LABEL[settings.towerTarget] || TARGET_LABEL.FIGHTERS; sub = settings.towerTarget === 'ALL' ? 'ヌメリンはしびれて止まり、バチッコは消える' : '相手のファイターだけを撃つ'; }
     else if (it.k === 'fillRule') {
       if (settings.numerin === 'OFF') { v = '狭いほう'; sub = 'ヌメリンがいないときは、いつも狭いほう'; }
       else { v = FILL_LABEL[settings.fillRule] || '狭いほう'; sub = settings.fillRule === 'QIX' ? 'ヌメリンを小さく閉じこめれば、広いほうを一気に取れる' : '囲むと狭いほうが塗れる(一発決着なし)'; }
@@ -4693,7 +4722,7 @@ function makeRival(i) {
   const home = idx(i ? (GW * 3) >> 2 : GW >> 2, 0);
   return { id: i, team: (i + 1) % NT, c: home, home, fx: 0, fy: 0, vx: 0, vy: 1, look: 1, drawing: false, trail: [], pts: [], plan: [], fast: false,
            dead: 0, inv: 1.5, area: 0, stuck: 0, think: rand(0.3, 1.0), sayTxt: '', sayT: 0, kills: 0, downs: 0, combo: 0, comboT: 0,
-           stock: isStock() ? vsStock() : Infinity, out: false,
+           stock: isStock() ? vsStock() : Infinity, out: false, hp: FIGHTER_HP, hurtT: 9,
            col: RIVAL_COLS[i % RIVAL_COLS.length], name: RIVAL_NAMES[(i + 1) % RIVAL_NAMES.length] };
 }
 // 外周を1周する順のマス(下の真ん中から時計回り)を3等分した場所 = 3人のスタート地点(どこからでも公平)
@@ -4802,6 +4831,7 @@ function rivalClose(r) {
   // コンボ: 続けて囲むと柄が出る
   r.combo = r.comboT > 0 ? r.combo + 1 : 0; r.comboT = CONFIG.COMBO_TIME;
   claimFx(got, teamHex(r.team), false, r.name);
+  buildTowerFor(got, 2 + r.id, r.team);
   const tp = claimPattern(got, r.combo, r.c);
   if (tp) { const sp = surf.is3D ? surf.screenOf(r.c) : { x: r.fx * CS, y: FIELD_Y + r.fy * CS }; floats.push({ x: sp.x, y: sp.y - 30, txt: r.name + ' ' + TEAM_PATS[tp], t: 1.4, col: teamHex(r.team) }); }
   // 囲んだアイテム: 上塗りはそのファイターのもの。ほかは消える
@@ -4874,6 +4904,7 @@ function respawnRival(r) {
   const hp = surf.is3D ? surf.screenOf(r.home) : { x: ((r.home % GW) + 0.5) * CS, y: FIELD_Y + (((r.home / GW) | 0) + 0.5) * CS }, hx = hp.x, hy = hp.y;
   spawnParticles(hx, hy, 18, teamHex(r.team));
   floats.push({ x: hx, y: hy - 30, txt: r.name + ' 復活!', t: 1.2, col: teamHex(r.team) });
+  r.hp = FIGHTER_HP; r.hurtT = 9;
   r.c = r.home;                                      // スタート地点(埋もれていたら、そこから一番近い線)
   if (!isBoundary(r.c)) snapActor(r);
   syncPos(r); r.inv = 1.5; r.plan = [];
@@ -5016,7 +5047,7 @@ function updateRivals(dt) {
     const q = qixes[0];
     if (r.drawing) r.drawT = (r.drawT || 0) + dt; else r.drawT = 0;
     const fleeR = 7 + surf.def.arm * 0.7 + Math.max(0, rivalSkill() - 1) * 6;   // 強いほど早めに逃げる
-    if (r.drawing && r.mode !== 'flee' && ((q && Math.hypot(r.fx - q.x, r.fy - q.y) < fleeR) || r.drawT > 14)) rivalGoHome(r);
+    if (r.drawing && r.mode !== 'flee' && ((q && Math.hypot(r.fx - q.x, r.fy - q.y) < fleeR) || r.drawT > 14 || r.hp <= 2)) rivalGoHome(r);
     if (!r.plan.length) {
       if (r.drawing) { rivalGoHome(r); if (!r.plan.length) { rivalFail(r, 'stuck'); continue; } }
       else { r.think -= dt; if (r.think > 0) continue; r.think = thinkTime(); planRival(r); if (!r.plan.length) continue; }
@@ -5356,6 +5387,7 @@ function cancelTrail() {
 }
 
 function applyDeath() {
+  player.hp = FIGHTER_HP; player.hurtT = 9;
   if (!guarded) { if (!vsTimeRule()) lives--; areaMiss++; }
   guarded = false;
   for (const c of trail) grid[c] = OPEN; // 軌跡は消える
@@ -5723,9 +5755,9 @@ function drawHelp(t) {
   ctx.fillStyle = '#cdd8ff'; ctx.font = "13px 'Courier New', monospace";
   ['↑↓←→ / WASD / スティックで移動。Z / SPACE を押す間は速く描く',
    '空き地へ進むと線を引く。線につないで囲むと自分の色の陣地',
-   '相手の描きかけの線に入るとたおせる。自分の線をさわられるとやられる',
+   '相手の描きかけの線に入るとたおせる。体力が0か、線をさわられるとやられる',
    '時間切れ(残機制は最後まで残る)で、いちばん広い人の勝ち',
-   '続けて囲むとコンボの柄、大きく囲むと和柄が出る',
+   '陣地を取ると広さに応じたタワーが建ち、近づいた相手を撃つ(7種類)',
    '勝つと次のラウンド(平面・立体・球・クラインの壺 …)',
    'X を押す間は立体の全体が見える。P ポーズ / M 消音 / C スクショ',
    'ヌメリン・バチッコは 準備画面の「じゃま役」で出さないこともできる'].forEach((ln, i) => ctx.fillText(ln, W / 2, y + i * 20));
@@ -5959,7 +5991,7 @@ function updateWorld(dt, stepped) {
   if (deathTimer > 0) { updateParticles(dt); updateFloats(dt); return; }
   if (deathTimer > 0) { updateParticles(dt); updateFloats(dt); return; }
   if (deathTimer > 0) { updateParticles(dt); updateFloats(dt); return; }
-  if (hasRivals()) { updateRivals(dt); updateVoices(); updateBanter(dt); if (state !== 'play') { Snd.voiceStopAll(); for (const r of rivals) r.voice = false; return; } if (deathTimer > 0) { updateParticles(dt); updateFloats(dt); return; } }
+  if (hasRivals()) { updateRivals(dt); updateTowers(dt); if (state !== 'play') return; updateVoices(); updateBanter(dt); if (state !== 'play') { Snd.voiceStopAll(); for (const r of rivals) r.voice = false; return; } if (deathTimer > 0) { updateParticles(dt); updateFloats(dt); return; } }
   if (fieldDirty) { fieldDirty = false; redrawField(); }
   updateItems(dt);
   areaTime += dt;
@@ -6322,9 +6354,11 @@ function render() {
   if (surf.is3D) render3D(t);
   else render2D(t);
   drawItems();
+  drawTowers();
   if (rivals.length && !surf.is3D) drawRivals(t);
   if (rivals.length && surf.is3D) drawRivals3D(t);
   if ((rivals.length || souls.length)) drawSouls(false);
+  drawShots(); drawHpBars();
   if (isVS() && rivals.length && (state === 'play' || state === 'ready' || state === 'pause')) drawVsHud();
   if (surf.is3D && !['title', 'options', 'achv', 'stats', 'help', 'gallery'].includes(state) && !isResult()) drawBackView(t);
   if (state === 'play' || state === 'ready' || state === 'pause') drawStatus();
@@ -6395,6 +6429,371 @@ function drawBloom() {
   ctx.globalAlpha = 0.22; ctx.drawImage(bloom1, 0, 0, W, H);
   ctx.globalAlpha = 0.30; ctx.drawImage(bloom2, 0, 0, W, H);
   ctx.restore();
+}
+
+
+/* =====================================================================
+   タワー(ナワバリディフェンス)
+   陣地を取ると、一度に囲んだ広さに応じたタワーが、その陣地の奥に建つ(建設アニメのあと動き出す)。
+   タワーは射程に入った相手(ファイター。設定でヌメリン・バチッコも)をいちばん近い順に撃つ。
+   ファイターは体力 FIGHTER_HP。0 でやられる(今までのやられ方と同じ)。しばらく撃たれなければ回復する。
+   タワーの下の陣地を上塗りされると、タワーは壊れる。1人 TOWER_MAX 基まで(こえたら古いものから撤去)
+   ===================================================================== */
+// min: 一度に囲んだ広さ(盤面の%)/ range: 射程(ふつうの広さの平面のマス)/ cd: 次に撃つまでの秒 / dmg: 1発の強さ
+const TOWERS = [
+  { k:'gun',     name:'機銃',             min:0.5, range:14, cd:0.55, dmg:1, shot:'bullet' },
+  { k:'twin',    name:'ツイン機銃',       min:1.5, range:15, cd:0.6,  dmg:1, shot:'bullet', n:2 },
+  { k:'missile', name:'ミサイルランチャー', min:3,  range:24, cd:1.8,  dmg:2, shot:'missile' },
+  { k:'mortar',  name:'迫撃砲',           min:5,   range:26, cd:2.4,  dmg:2, shot:'shell', splash:5 },
+  { k:'laser',   name:'レーザー砲台',     min:8,   range:30, cd:2.1,  dmg:3, shot:'beam' },
+  { k:'tesla',   name:'テスラコイル',     min:12,  range:18, cd:1.7,  dmg:1, shot:'zap', chain:3 },
+  { k:'fort',    name:'要塞ミサイル',     min:18,  range:34, cd:3.2,  dmg:2, shot:'missile', n:4 },
+];
+const FIGHTER_HP = 5, TOWER_MAX = 10, BUILD_T = 1.8, HP_REGEN_WAIT = 3, HP_REGEN = 0.7;
+let towers = [], shots = [], towerChkT = 0, buildSndT = 0, fireSndT = 0;
+// 一度に囲んだ広さ → タワーの段階(0〜6)。小さすぎると -1(建たない)
+function towerTier(pct) { let lv = -1; TOWERS.forEach((d, i) => { if (pct >= d.min) lv = i; }); return lv; }
+// 射程の目安の倍率: 盤面が広いほどマスで数えた射程も長く(平面のふつうの広さで 1 くらい)
+function towerScale() { return clamp(Math.sqrt(initOpen || surf.N) / 135, 0.35, 2); }
+function towerRange(T) { return TOWERS[T.lv].range * towerScale(); }
+function ownerOf(own) { return own === 1 ? null : rivals[own - 2] || null; }
+
+// 陣地を取ったとき: 広さに応じたタワーを、その陣地のいちばん奥に建てる
+function buildTowerFor(cells, own, team) {
+  if (!isVS() || !cells.length || !initOpen || state !== 'play') return null;
+  const lv = towerTier(cells.length / initOpen * 100);
+  if (lv < 0) return null;
+  const inside = new Uint8Array(surf.N);
+  for (const c of cells) inside[c] = 1;
+  const outs = []; for (let i = 0; i < surf.N; i++) if (!inside[i]) outs.push(i);
+  const d = bfsDist(outs);
+  let best = cells[0], bd = -1;
+  for (const c of cells) if (d[c] > bd && !towers.some(T => T.c === c)) { bd = d[c]; best = c; }
+  const T = { c: best, own, team, lv, build: 0, cd: 0.8, ang: rand(0, Math.PI * 2), aimT: null, id: Math.random() };
+  towers.push(T);
+  // 1人 TOWER_MAX 基まで: こえたら古いものから撤去
+  const mine = towers.filter(q => q.own === own);
+  if (mine.length > TOWER_MAX) removeTower(mine[0], false);
+  if (own === 1) floats.push({ x: towerScreen(T).x, y: towerScreen(T).y - 24, txt: TOWERS[lv].name + ' 建設中…', t: 1.6, col: teamHex(team) });
+  return T;
+}
+function towerScreen(T) { return surf.screenOf(T.c); }
+function towerVisible(T) { return !surf.is3D || (visA.length === surf.N && visA[T.c]); }
+function removeTower(T, broken) {
+  const i = towers.indexOf(T);
+  if (i < 0) return;
+  towers.splice(i, 1);
+  const p = towerScreen(T);
+  if (towerVisible(T)) {
+    spawnParticles(p.x, p.y, broken ? 26 : 10, broken ? '#ffb070' : '#9aa3bd');
+    if (broken) { rings.push({ x: p.x, y: p.y, t: 0, col: teamHex(T.team), R: 120, w: 0.8 }); Snd.splat(0.25); }
+  }
+  if (broken && T.own === 1) floats.push({ x: p.x, y: p.y - 20, txt: TOWERS[T.lv].name + ' こわされた!', t: 1.6, col: '#ff8fa8' });
+}
+
+// ---- ねらう相手 ----
+function towerEnemies(T) {
+  const out = [];
+  if (T.team !== 0 && deathTimer <= 0 && !player.out && !(player.invuln > 0)) out.push({ type: 'p', ref: player });
+  for (const r of rivals) if (r.team !== T.team && r.dead <= 0 && !r.out && !(r.inv > 0)) out.push({ type: 'r', ref: r });
+  if (settings.towerTarget === 'ALL') {
+    for (const q of qixes) if (!(q.stun > 0)) out.push({ type: 'q', ref: q });
+    for (const sp of sparxes) out.push({ type: 's', ref: sp });
+  }
+  return out;
+}
+function tgCell(tg) { return tg.type === 'p' ? player.c : tg.type === 'r' ? tg.ref.c : tg.type === 'q' ? surf.qixCell(tg.ref) : tg.ref.c; }
+function tgAlive(tg) {
+  if (tg.type === 'p') return deathTimer <= 0 && !player.out && state === 'play';
+  if (tg.type === 'r') return tg.ref.dead <= 0 && !tg.ref.out;
+  if (tg.type === 'q') return qixes.includes(tg.ref);
+  return sparxes.includes(tg.ref);
+}
+function tgScreen(tg) {
+  if (tg.type === 'p') return playerScreen();
+  if (tg.type === 'r') return fighterScreen(tg.ref);
+  if (tg.type === 'q') return surf.is3D ? surf.screenOf(surf.qixCell(tg.ref)) : { x: tg.ref.x * CS, y: FIELD_Y + tg.ref.y * CS };
+  return surf.screenOf(tg.ref.c);
+}
+function tgCol(tg) { return tg.type === 'p' ? teamHex(0) : tg.type === 'r' ? teamHex(tg.ref.team) : '#9fe3ff'; }
+function nearestEnemy(T, list, skip) {
+  const R = towerRange(T);
+  let best = null, bd = R;
+  for (const tg of list) {
+    if (skip && skip.includes(tg.ref)) continue;
+    const d = cellDist(T.c, tgCell(tg));
+    if (d <= bd) { bd = d; best = tg; }
+  }
+  return best;
+}
+
+// ---- 毎フレーム: 建設・ねらう・撃つ・弾・体力の回復・こわれたかの確認 ----
+function updateTowers(dt) {
+  if (state !== 'play') return;
+  towerChkT -= dt; buildSndT -= dt; fireSndT -= dt;
+  let building = false;
+  for (const T of towers.slice()) {
+    if (T.build < BUILD_T) {
+      T.build += dt;
+      if (T.own === 1) building = true;
+      if (T.build >= BUILD_T) {                         // 完成
+        const p = towerScreen(T);
+        if (towerVisible(T)) { rings.push({ x: p.x, y: p.y, t: 0, col: teamHex(T.team), R: 90, w: 0.7 }); spawnParticles(p.x, p.y, 12, teamHex(T.team)); }
+        if (T.own === 1) { floats.push({ x: p.x, y: p.y - 24, txt: TOWERS[T.lv].name + ' 起動!', t: 1.4, col: teamHex(T.team) }); Snd.select(); }
+      }
+      continue;
+    }
+    // ねらう
+    const list = towerEnemies(T), tg = nearestEnemy(T, list);
+    T.aimT = tg;
+    if (tg) {
+      const a = towerScreen(T), b = tgScreen(tg), want = Math.atan2(b.y - a.y, b.x - a.x);
+      let dA = ((want - T.ang + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      T.ang += dA * Math.min(1, dt * 8);
+    }
+    T.cd -= dt;
+    if (T.cd <= 0 && tg) { fireTower(T, tg, list); T.cd = TOWERS[T.lv].cd * rand(0.9, 1.1); }
+  }
+  if (building && buildSndT <= 0) { Snd.tick(false); buildSndT = 0.22; }   // トントン…(建設の音)
+  // 弾
+  for (const s of shots) {
+    if (s.delay > 0) { s.delay -= dt; continue; }
+    s.t += dt / s.dur;
+    if (s.kind === 'missile' && tgAlive(s.tg)) s.c1 = tgCell(s.tg);          // ミサイルは追いかける
+    if (s.kind === 'missile' && Math.random() < dt * 30) {                    // けむり
+      const p = shotPos(s); if (p) particles.push({ x: p.x, y: p.y, vx: rand(-8, 8), vy: rand(-18, -6), t: 0.35, col: '#8a90a8' });
+    }
+    if (s.t >= 1 && !s.done) { s.done = true; shotHit(s); }
+  }
+  shots = shots.filter(s => !(s.done && s.t >= (s.fade || 1)));
+  // 体力の回復(しばらく撃たれなければ)
+  for (const f of [player].concat(rivals)) {
+    if (f.hp == null) f.hp = FIGHTER_HP;
+    f.hurtT = (f.hurtT || 0) + dt;
+    if (f.hurtT > HP_REGEN_WAIT && f.hp < FIGHTER_HP) f.hp = Math.min(FIGHTER_HP, f.hp + HP_REGEN * dt);
+  }
+  // タワーの下の陣地が相手のものになっていたら、こわれる
+  if (towerChkT <= 0) {
+    towerChkT = 0.4;
+    for (const T of towers.slice()) if (grid[T.c] !== WALL || ownerTeam(ownA[T.c]) !== T.team) removeTower(T, true);
+  }
+}
+function fireTower(T, tg, list) {
+  const D = TOWERS[T.lv], col = teamHex(T.team), c0 = T.c, c1 = tgCell(tg), dist = cellDist(c0, c1);
+  const vis = towerVisible(T);
+  if (D.shot === 'bullet') {
+    for (let i = 0; i < (D.n || 1); i++) shots.push({ kind: 'bullet', T, tg, c0, c1, t: 0, dur: Math.max(0.08, dist / 70), dmg: D.dmg, col, delay: i * 0.1, side: i ? 1 : -1 });
+    if (vis && fireSndT <= 0) { Snd.tick(true); fireSndT = 0.05; }
+  } else if (D.shot === 'missile') {
+    for (let i = 0; i < (D.n || 1); i++) shots.push({ kind: 'missile', T, tg, c0, c1, t: 0, dur: 0.9 + dist / 60, dmg: D.dmg, col, delay: i * 0.14, side: (i % 2 ? 1 : -1) * (1 + (i >> 1)) });
+    if (vis && fireSndT <= 0) { Snd.fuseCr(); fireSndT = 0.08; }
+  } else if (D.shot === 'shell') {
+    shots.push({ kind: 'shell', T, tg, c0, c1, t: 0, dur: 1.1, dmg: D.dmg, col, splash: D.splash });
+    if (vis && fireSndT <= 0) { Snd.fuseCr(); fireSndT = 0.08; }
+  } else if (D.shot === 'beam') {
+    shots.push({ kind: 'beam', T, tg, c0, c1, t: 0, dur: 0.12, fade: 3, dmg: D.dmg, col });
+    if (vis) Snd.tick(true);
+  } else if (D.shot === 'zap') {
+    // 電撃: 近い相手から順に、つぎつぎ飛び移る(最大 chain 人)
+    const hitList = [tg], seen = [tg.ref];
+    let cur = tg;
+    for (let k = 1; k < D.chain; k++) {
+      const nx = nearestEnemy({ c: tgCell(cur), lv: T.lv }, list, seen);
+      if (!nx) break;
+      hitList.push(nx); seen.push(nx.ref); cur = nx;
+    }
+    let from = c0;
+    hitList.forEach((h, k) => { shots.push({ kind: 'zap', T, tg: h, c0: from, c1: tgCell(h), t: 0, dur: 0.06 + k * 0.05, fade: 5, dmg: D.dmg, col, jag: Array.from({ length: 6 }, () => rand(-1, 1)) }); from = tgCell(h); });
+    if (vis) Snd.tick(true);
+  }
+}
+// 弾の画面の位置(立体で見えていないところは null)
+function shotPos(s) {
+  if (surf.is3D && visA.length === surf.N && (!visA[s.c0] || !visA[s.c1])) return null;
+  const a = surf.screenOf(s.c0), b = (s.kind === 'missile' || s.kind === 'bullet') && tgAlive(s.tg) ? tgScreen(s.tg) : surf.screenOf(s.c1);
+  const t = clamp(s.t, 0, 1), dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1;
+  let x = a.x + dx * t, y = a.y + dy * t;
+  if (s.kind === 'shell') y -= Math.sin(Math.PI * t) * Math.min(90, 30 + L * 0.5);            // 山なり
+  if (s.kind === 'missile') { const k = Math.sin(Math.PI * t) * Math.min(40, 10 + L * 0.25) * (s.side || 1); x += -dy / L * k; y += dx / L * k - Math.sin(Math.PI * t) * 12; }
+  if (s.kind === 'bullet') { x += -dy / L * (s.side || 0) * 2.5; y += dx / L * (s.side || 0) * 2.5; }
+  return { x, y, a, b };
+}
+function shotHit(s) {
+  if (s.kind === 'shell') {                           // 迫撃砲: 着弾点のまわりのみんなに当たる
+    const p = surf.screenOf(s.c1);
+    if (!surf.is3D || visA[s.c1]) { rings.push({ x: p.x, y: p.y, t: 0.2, col: s.col, R: 70, w: 0.8 }); spawnParticles(p.x, p.y, 14, '#c9a060'); }
+    Snd.splat(0.15);
+    for (const tg of towerEnemies(s.T)) if (cellDist(tgCell(tg), s.c1) <= s.splash * towerScale()) hurtTarget(tg, s.dmg, s.T);
+    return;
+  }
+  if (!tgAlive(s.tg)) return;
+  if (s.kind === 'bullet' && cellDist(tgCell(s.tg), s.c1) > 2.5 * towerScale()) return;   // 機銃は、よけられたら外れる
+  hurtTarget(s.tg, s.dmg, s.T);
+}
+// 当たった: 体力を減らす。0 になったらやられる(タワーの持ち主の手柄)
+function hurtTarget(tg, dmg, T) {
+  if (!tgAlive(tg)) return;
+  const P = tgScreen(tg), vis = !surf.is3D || visA[tgCell(tg)];
+  if (vis) spawnParticles(P.x, P.y, 6, teamHex(T.team));
+  if (tg.type === 'q') { tg.ref.stun = 2.5; if (vis) rings.push({ x: P.x, y: P.y, t: 0.3, col: '#9fe3ff' }); return; }     // ヌメリンはしびれる
+  if (tg.type === 's') { sparxes.splice(sparxes.indexOf(tg.ref), 1); if (vis) spawnParticles(P.x, P.y, 16, '#ff7a4a'); return; }   // バチッコは消える
+  const f = tg.ref;
+  if (f.hp == null) f.hp = FIGHTER_HP;
+  f.hp -= dmg; f.hurtT = 0;
+  if (f.hp > 0) return;
+  f.hp = FIGHTER_HP;
+  const owner = ownerOf(T.own), why = TOWERS[T.lv].name;
+  if (tg.type === 'p') { if (owner) owner.kills++; death((owner ? owner.name + 'の' : '') + why + 'に撃たれた'); }
+  else { rivalFail(f, 'tower', owner || undefined); if (!owner && isVS()) { vsStat.kills++; if (vsStat.kills >= 5) unlock('kill5'); } }
+}
+
+// ---- 描画 ----
+function drawTowers() {
+  if (lapsePlay || !towers.length) return;
+  const s = surf.is3D ? 1 : sprK();
+  for (const T of towers) {
+    if (!towerVisible(T)) continue;
+    const p = towerScreen(T);
+    drawTower(T, p.x, p.y, s);
+  }
+}
+function drawTower(T, x, y, s) {
+  const lv = T.lv, col = teamHex(T.team), p = Math.min(1, T.build / BUILD_T);
+  const big = lv === 6 ? 1.35 : lv >= 4 ? 1.15 : 1, R = (surf.is3D ? 9 : 11) * s * big;
+  ctx.save(); ctx.translate(x, y);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.ellipse(0, R * 0.35, R * 1.2, R * 0.55, 0, 0, Math.PI * 2); ctx.fill();   // 影
+  if (p < 1) {
+    // 建設中: 足場の柱が伸び、横木が入り、本体がせり上がり、最後に砲台がつく
+    const k1 = Math.min(1, p / 0.35), hgt = R * 1.8 * k1;
+    ctx.strokeStyle = '#d8b56a'; ctx.lineWidth = Math.max(1, 1.2 * s);
+    ctx.beginPath();
+    for (const sx of [-1, 1]) { ctx.moveTo(sx * R, R * 0.4); ctx.lineTo(sx * R, R * 0.4 - hgt); }
+    for (let yy = R * 0.4; yy > R * 0.4 - hgt; yy -= R * 0.6) { ctx.moveTo(-R, yy); ctx.lineTo(R, yy); }
+    if (k1 >= 1) { ctx.moveTo(-R, R * 0.4); ctx.lineTo(R, R * 0.4 - hgt); }
+    ctx.stroke();
+    if (p > 0.35) {
+      const k2 = Math.min(1, (p - 0.35) / 0.4);
+      ctx.save(); ctx.beginPath(); ctx.rect(-R * 1.3, R * 0.9 - R * 2.2 * k2, R * 2.6, R * 2.2 * k2); ctx.clip();
+      drawTowerBase(lv, R, col, s);
+      ctx.restore();
+    }
+    if (p > 0.75) { const k3 = (p - 0.75) / 0.25; ctx.scale(k3, k3); drawTowerTop(T, R, col, s); }
+    // 溶接の火花(小さな点。光らせない)
+    if (Math.random() < 0.5) { ctx.fillStyle = '#ffd98a'; ctx.fillRect(rand(-R, R), rand(-R, R * 0.4), 1.5 * s, 1.5 * s); }
+    // 進み具合のバー(砲台の縮小を戻してから)
+    ctx.restore(); ctx.save(); ctx.translate(x, y);
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(-R, R + 3, R * 2, 3 * s);
+    ctx.fillStyle = col; ctx.fillRect(-R, R + 3, R * 2 * p, 3 * s);
+  } else {
+    drawTowerBase(lv, R, col, s);
+    drawTowerTop(T, R, col, s);
+  }
+  ctx.restore();
+}
+// 台座: 暗い金属の円盤に、チームの色の輪
+function drawTowerBase(lv, R, col, s) {
+  ctx.beginPath();
+  if (lv === 6) ctx.rect(-R, -R, R * 2, R * 2); else ctx.arc(0, 0, R, 0, Math.PI * 2);
+  ctx.fillStyle = '#262b40'; ctx.fill();
+  ctx.strokeStyle = '#0a0c14'; ctx.lineWidth = Math.max(2, 4.5 * s); ctx.stroke();      // 黒いふちで柄の上でも目立つ
+  ctx.strokeStyle = col; ctx.lineWidth = Math.max(1.5, 2.4 * s); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.10)'; ctx.beginPath(); ctx.arc(-R * 0.3, -R * 0.35, R * 0.45, 0, Math.PI * 2); ctx.fill();   // つや
+}
+// 砲台: 種類ごとの形。ねらっている向きへ回る
+function drawTowerTop(T, R, col, s) {
+  const lv = T.lv, lw = Math.max(1, 1.4 * s);
+  ctx.lineWidth = lw; ctx.strokeStyle = '#141824';
+  if (lv === 3) {                                    // 迫撃砲: 上を向いた太い筒
+    ctx.fillStyle = '#5a627e'; ctx.beginPath(); ctx.arc(0, 0, R * 0.62, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#0c0f18'; ctx.beginPath(); ctx.arc(0, 0, R * 0.34, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = col; ctx.beginPath(); ctx.arc(0, 0, R * 0.62, 0, Math.PI * 2); ctx.stroke();
+    return;
+  }
+  if (lv === 5) {                                    // テスラコイル: 重なった輪と玉
+    ctx.strokeStyle = col;
+    for (let i = 0; i < 3; i++) { ctx.globalAlpha = 0.9 - i * 0.2; ctx.beginPath(); ctx.arc(0, -i * R * 0.18, R * (0.7 - i * 0.16), 0, Math.PI * 2); ctx.stroke(); }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = mixHex(col, '#ffffff', 0.55); ctx.beginPath(); ctx.arc(0, -R * 0.5, R * 0.3, 0, Math.PI * 2); ctx.fill();
+    return;
+  }
+  ctx.save(); ctx.rotate(T.ang);
+  if (lv === 0 || lv === 1) {                        // 機銃・ツイン機銃
+    ctx.fillStyle = '#1b2030';
+    const bs = lv === 1 ? [-R * 0.22, R * 0.22] : [0];
+    for (const o of bs) { ctx.fillRect(0, o - R * 0.13, R * 1.25, R * 0.26); }
+    ctx.fillStyle = '#9aa3bd'; ctx.beginPath(); ctx.arc(0, 0, R * 0.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  } else if (lv === 2 || lv === 6) {                 // ミサイルランチャー・要塞ミサイル: 箱に弾頭
+    const w = R * (lv === 6 ? 1.3 : 1.1), h = R * (lv === 6 ? 1.3 : 0.95);
+    ctx.fillStyle = '#6b7390'; ctx.fillRect(-w / 2, -h / 2, w, h); ctx.strokeRect(-w / 2, -h / 2, w, h);
+    ctx.fillStyle = col;
+    const n = lv === 6 ? 3 : 2;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { ctx.beginPath(); ctx.arc(w / 2 - R * 0.12, -h / 2 + h * (i + 0.5) / n, R * 0.12, 0, Math.PI * 2); ctx.fill(); }
+    if (lv === 6) { ctx.strokeStyle = col; ctx.beginPath(); ctx.arc(-w * 0.15, 0, R * 0.3, 0, Math.PI * 2); ctx.stroke(); }
+  } else if (lv === 4) {                             // レーザー砲台: ひし形とレンズ
+    ctx.fillStyle = '#b8c0da';
+    ctx.beginPath(); ctx.moveTo(R * 0.8, 0); ctx.lineTo(0, R * 0.55); ctx.lineTo(-R * 0.6, 0); ctx.lineTo(0, -R * 0.55); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = col; ctx.beginPath(); ctx.arc(R * 0.25, 0, R * 0.25, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(R * 0.25, 0, R * 0.1, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+function drawShots() {
+  if (lapsePlay || !shots.length) return;
+  ctx.save();
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (const s of shots) {
+    if (s.delay > 0) continue;
+    const p = shotPos(s);
+    if (!p) continue;
+    if (s.kind === 'bullet') {
+      ctx.strokeStyle = s.col; ctx.lineWidth = 2;
+      const dx = p.b.x - p.a.x, dy = p.b.y - p.a.y, L = Math.hypot(dx, dy) || 1;
+      ctx.beginPath(); ctx.moveTo(p.x - dx / L * 6, p.y - dy / L * 6); ctx.lineTo(p.x, p.y); ctx.stroke();
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
+    } else if (s.kind === 'missile') {
+      const q = shotPos(Object.assign({}, s, { t: Math.max(0, s.t - 0.04) })) || p, a = Math.atan2(p.y - q.y, p.x - q.x);
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(a);
+      ctx.fillStyle = '#d8dce8'; ctx.fillRect(-5, -1.6, 8, 3.2);
+      ctx.fillStyle = s.col; ctx.beginPath(); ctx.moveTo(3, -1.6); ctx.lineTo(6, 0); ctx.lineTo(3, 1.6); ctx.fill();
+      ctx.fillStyle = '#ffb040'; ctx.beginPath(); ctx.arc(-6, 0, 1.8, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    } else if (s.kind === 'shell') {
+      const g = surf.screenOf(s.c1);
+      ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(g.x, g.y, 5 * s.t, 2.5 * s.t, 0, 0, Math.PI * 2); ctx.fill();   // 着弾点の影
+      ctx.fillStyle = '#3a3f52'; ctx.beginPath(); ctx.arc(p.x, p.y, 3.4, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = s.col; ctx.lineWidth = 1; ctx.stroke();
+    } else if (s.kind === 'beam') {                  // ビーム: チームの色の帯と白い芯。ゆっくり消える(点滅しない)
+      const k = s.done ? Math.max(0, 1 - (s.t - 1) / 2) : 1, a = p.a, b = surf.screenOf(s.c1);
+      ctx.globalAlpha = 0.5 * k; ctx.strokeStyle = s.col; ctx.lineWidth = 7; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      ctx.globalAlpha = 0.9 * k; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else if (s.kind === 'zap') {                   // 電撃: ぎざぎざの線(形は撃ったときに決めて動かさない)
+      const k = s.done ? Math.max(0, 1 - (s.t - 1) / 4) : Math.min(1, s.t), a = surf.screenOf(s.c0), b = surf.screenOf(s.c1);
+      const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y);
+      s.jag.forEach((j, i) => { const t = (i + 1) / (s.jag.length + 1); ctx.lineTo(a.x + dx * t - dy / L * j * 7, a.y + dy * t + dx / L * j * 7); });
+      ctx.lineTo(b.x, b.y);
+      ctx.globalAlpha = 0.45 * k; ctx.strokeStyle = s.col; ctx.lineWidth = 5; ctx.stroke();
+      ctx.globalAlpha = 0.85 * k; ctx.strokeStyle = mixHex(s.col, '#ffffff', 0.6); ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+  ctx.restore();
+}
+// 体力のバー(減っているときだけ)
+function drawHpBars() {
+  if (lapsePlay || !isVS() || state === 'title') return;
+  const list = [];
+  if (deathTimer <= 0 && !player.out) list.push({ f: player, p: playerScreen(), col: teamHex(0), c: player.c });
+  for (const r of rivals) if (r.dead <= 0 && !r.out) list.push({ f: r, p: fighterScreen(r), col: teamHex(r.team), c: r.c });
+  for (const e of list) {
+    const hp = e.f.hp == null ? FIGHTER_HP : e.f.hp;
+    if (hp >= FIGHTER_HP - 0.01) continue;
+    if (surf.is3D && visA.length === surf.N && !visA[e.c]) continue;
+    const w = 22, x = e.p.x - w / 2, y = e.p.y - 26;
+    ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(x - 1, y - 1, w + 2, 5);
+    ctx.fillStyle = hp <= 2 ? '#ff5c5c' : e.col; ctx.fillRect(x, y, w * Math.max(0, hp) / FIGHTER_HP, 3);
+  }
 }
 
 /* ---- 陣地が確定したときの演出: 一度に囲んだ広さで段階が上がる(光らせる・点滅はしない) ----
