@@ -22,7 +22,10 @@ NAWABARI(ナワバリバトル、`C:\Users\sisho\Desktop\nawabari`、タグ v1-b
 - `updateTowers(dt)`: ねらう(`towerEnemies` / `nearestEnemy`、射程は `towerRange` = 基本射程 × `towerScale`)→ `fireTower` → 弾 `shots`(bullet / missile / shell / beam / zap)→ `hurtTarget`
 - 体力 `FIGHTER_HP`(自機 `player.hp`・CPU `r.hp`)、`HP_REGEN_WAIT` 秒で回復。0 で `death` / `rivalFail(r, 'tower', 持ち主)`
 - タワーの下の陣地の持ち主が変わるとこわれる(`removeTower`)。1人 `TOWER_MAX` 基まで
-- 描画: `drawTowers` / `drawTower`(台座 `drawTowerBase` + 種類ごとの砲台 `drawTowerTop`)/ `drawShots` / `drawHpBars`
+- 描画: `drawTowers` → `drawTower` → `drawTowerArt`(斜め上から見た立体風。台座+本体 `towerBaseSprite`・砲台 `towerTurretSprite` は種類・チームごとに一度だけ描いて `towerSprites` にしまう)/ `drawShots` / `drawHpBars`
+- 自動で塗る: 近くに敵がいないと `towerPaint`(射程内の自分の陣地のとなりの空き地・中立へインクの弾 'ink')→ `paintSplat`(claimed を増やす・ふちを線に)
+- 乗っ取り: 敵のタワーの足もと(`TOWER_CORE` マス)は上塗りで塗りかえられず `towerCoreGuard` が制御ゲージ `T.hold` を減らす。0 で `hijackTower`
+- 改行は CRLF。このフォルダは `core.autocrlf=false`(元の nawabari と同じ)。sed -i で書くと LF になるので注意
 
 ## オーナーについて(大事)
 - 返事はすべて日本語(上のとおり)。
