@@ -1707,5 +1707,43 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   settings.stageSel = 'TOUR'; settings.vsCpu = 'AUTO';
 }
 
+// ---- 118) タワーが自動で塗る・上塗りで乗っ取り ----
+{
+  const openN = () => { let n = 0; for (let i = 0; i < surf.N; i++) if (grid[i] === OPEN) n++; return n; };
+  for (const sk of ['PLANE', 'CUBE']) {
+    settings.mode = 'VS'; settings.stageSel = sk; settings.vsCpu = '3'; startGame(); setState('play');
+    sparxes = []; player.invuln = 99; for (const r of rivals) r.dead = 99;       // 敵のいない状態で
+    const cells = []; const d0 = bfsDist([surf.qixCell(qixes[0])]);
+    for (let i = 0; i < surf.N && cells.length < initOpen * 0.04; i++) if (grid[i] === OPEN && d0[i] > 12) { grid[i] = WALL; ownA[i] = 1; colA[i] = teamNo(0); cells.push(i); }
+    claimed += cells.length; recountAreas();
+    const T = buildTowerFor(cells, 1, 0); T.build = BUILD_T; T.paintCd = 0;
+    const a0 = playerArea(), o0 = openN();
+    let err = null;
+    try { for (let i = 0; i < 60 * 12; i++) { blinkT += 1 / 60; updateTowers(1 / 60); } } catch (e) { err = e.stack; }
+    assert(sk + ': 敵がいないとタワーが少しずつ塗り広げる', !err && playerArea() > a0 && openN() < o0, err || (a0 + '→' + playerArea()));
+    assert(sk + ': 塗っても占領数の整合がくずれない', claimed === initOpen - openN() - trail.length - rivalTrailCells(), claimed + ' vs ' + (initOpen - openN()));
+    assert(sk + ': 塗ったふちは線(ネオン)になる', [...Array(surf.N).keys()].some(c => grid[c] === WALL && ownA[c] === 1 && colA[c] === 0 && lineOwnerHex(c)));
+    // 上塗りで乗っ取り
+    const r = rivals[0]; r.dead = 0;
+    const core = bfsNear(T.c, 1);
+    const hold0 = T.hold;
+    for (let i = 0; i < 60 * 1; i++) { overPaintCells(core, 2 + r.id, r.team); blinkT += 1 / 60; updateTowers(1 / 60); }
+    assert(sk + ': タワーの足もとは上塗りで塗りかえられない', ownA[T.c] === 1 && T.hold < hold0);
+    for (let i = 0; i < 60 * 5 && T.team === 0; i++) { overPaintCells(core, 2 + r.id, r.team); blinkT += 1 / 60; updateTowers(1 / 60); }
+    assert(sk + ': 上塗りで足もとを走り続けると乗っ取れる', T.team === r.team && T.own === 2 + r.id && ownerTeam(ownA[T.c]) === r.team && towers.includes(T));
+    // 途中でやめるとゲージは戻る
+    const T2 = buildTowerFor(cells, 1, 0); T2.build = BUILD_T;
+    for (let i = 0; i < 30; i++) { overPaintCells(bfsNear(T2.c, 1), 2 + r.id, r.team); blinkT += 1 / 60; updateTowers(1 / 60); }
+    const h1 = T2.hold; for (let i = 0; i < 120; i++) { blinkT += 1 / 60; updateTowers(1 / 60); }
+    assert(sk + ': 乗っ取りを途中でやめると制御ゲージが戻る', T2.hold > h1 && T2.team === 0, 'h1=' + h1.toFixed(2) + ' hold=' + T2.hold.toFixed(2) + ' team=' + T2.team + ' in=' + towers.includes(T2) + ' dist=' + cellDist(T2.c, T.c).toFixed(1));
+    err = null; try { render(); } catch (e) { err = e.stack; } assert(sk + ': 乗っ取りの描画', !err, err);
+  }
+  // 自機が乗っ取ると実績
+  delete achvGot.hijack;
+  const T3 = towers.find(T => T.team !== 0) || towers[0]; T3.capOwn = 1; T3.capTeam = 0; hijackTower(T3);
+  assert('自分が乗っ取ると「乗っ取り」の実績', !!achvGot.hijack && T3.team === 0);
+  settings.stageSel = 'TOUR'; settings.vsCpu = 'AUTO';
+}
+
 console.log(fails === 0 ? '\n=== 全テスト合格 ===' : '\n=== 失敗 ' + fails + ' 件 ===');
 process.exit(fails === 0 ? 0 : 1);

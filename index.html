@@ -795,6 +795,7 @@ const ACHV = [
   { id:'stars',    name:'星をつかむ',     txt:'星型3種すべてで勝つ' },
   { id:'all',      name:'全ステージ制覇', txt:'すべてのステージで勝つ' },
   { id:'nearmiss', name:'ギリギリの達人', txt:'1ゲームでニアミスを5回' },
+  { id:'hijack',   name:'乗っ取り',       txt:'上塗りで相手のタワーを乗っ取る' },
 ];
 const achvGot = store.get('qlaim.ach', {});
 const wagaraGot = store.get('qlaim.wagara', {});     // 自分で出した和柄の種類
@@ -1388,7 +1389,13 @@ const I18N_EN = {
   "ヌメリンはしびれて止まり、バチッコは消える": "Numerin gets stunned, Bachikko is destroyed",
   "相手のファイターだけを撃つ": "Only shoots rival fighters",
   "陣地を取ると広さに応じたタワーが建ち、近づいた相手を撃つ(7種類)": "Claiming turf builds a tower by size; it shoots intruders (7 types)",
-  "相手の描きかけの線に入るとたおせる。体力が0か、線をさわられるとやられる": "Cross a rival's line to KO them; 0 HP or a touched line and you're out"
+  "相手の描きかけの線に入るとたおせる。体力が0か、線をさわられるとやられる": "Cross a rival's line to KO them; 0 HP or a touched line and you're out",
+  " 乗っ取った!": " captured!",
+  " 乗っ取られた!": " was captured!",
+  "乗っ取り": "Hijacker",
+  "上塗りで相手のタワーを乗っ取る": "Capture a rival's tower with Overpaint",
+  "陣地を取るとタワーが建ち、相手を撃つ。いないときは少しずつ塗り広げる": "Claims build towers that shoot rivals, and slowly paint turf when idle",
+  "上塗りで相手のタワーの足もとを走り続けると、乗っ取れる": "Keep overpainting around a rival's tower to capture it"
 };
 const I18N_RULES = [
   [/ラスト(\d+)秒!/g, 'Last $1 seconds!'],
@@ -4255,7 +4262,11 @@ function bfsPath(a, pass, goal, limit) {
 function qixNear3(c, r) { const q = qixes[0]; return q ? cellDist(c, surf.qixCell(q)) < r : false; }
 function planRival3D(r) {
   const sk = rivalSkill();
-  if (r.overT > 0) {                                 // 上塗り中: 陣地の上を通って、近くの相手の陣地へ
+  if (r.overT > 0) {                                 // 上塗り中: 陣地の上を通って、敵のタワー(なければ近くの相手の陣地)へ
+    if (towers.some(T => T.team !== r.team)) {
+      r.plan = bfsPath(r.c, n => grid[n] === WALL && !baseA[n], n => towers.some(T => T.team !== r.team && T.c === n), 40);
+      if (r.plan.length) { r.mode = 'over'; return; }
+    }
     r.plan = bfsPath(r.c, n => grid[n] === WALL && !baseA[n], n => grid[n] === WALL && !baseA[n] && ownA[n] >= 1 && ownerTeam(ownA[n]) !== r.team, 30);
     if (r.plan.length) { r.mode = 'over'; return; }
   }
@@ -4638,6 +4649,7 @@ function overPaintCells(cells, own, team) {
   let n = 0;
   for (const c of cells) {
     if (grid[c] !== WALL || baseA[c] || colA[c] === 0 || colA[c] === HOME_COL) continue;
+    if (towers.length && towerCoreGuard(c, own, team)) continue;       // 敵のタワーの足もと: 塗らずに乗っ取りを進める
     const o = ownA[c];
     if (o === own) continue;
     if (o === OWN_NEUTRAL) {                                                                       // 中立 → 自分の陣地
@@ -4911,7 +4923,9 @@ function respawnRival(r) {
 }
 // 考える: 線の上にいるときに、次にどこへ線を引くか決める
 function planRival(r) {
-  if (r.overT > 0) {                                 // 上塗り中: 近くの相手の陣地・中立へ走る
+  if (r.overT > 0) {                                 // 上塗り中: 近くの敵のタワーを乗っ取りにいく。なければ近くの相手の陣地・中立へ
+    const et = towers.filter(T => T.team !== r.team).map(T => ({ T, d: cellDist(r.c, T.c) })).sort((a, b) => a.d - b.d)[0];
+    if (et && et.d < 40 * towerScale()) { r.plan = [[(et.T.c % GW) + 0.5, ((et.T.c / GW) | 0) + 0.5]]; r.mode = 'over'; return; }
     let best = null, bd = 1e9;
     for (let k = 0; k < 160; k++) {
       const c = (Math.random() * surf.N) | 0, o = ownA[c];
@@ -5757,10 +5771,11 @@ function drawHelp(t) {
    '空き地へ進むと線を引く。線につないで囲むと自分の色の陣地',
    '相手の描きかけの線に入るとたおせる。体力が0か、線をさわられるとやられる',
    '時間切れ(残機制は最後まで残る)で、いちばん広い人の勝ち',
-   '陣地を取ると広さに応じたタワーが建ち、近づいた相手を撃つ(7種類)',
+   '陣地を取るとタワーが建ち、相手を撃つ。いないときは少しずつ塗り広げる',
+   '上塗りで相手のタワーの足もとを走り続けると、乗っ取れる',
    '勝つと次のラウンド(平面・立体・球・クラインの壺 …)',
    'X を押す間は立体の全体が見える。P ポーズ / M 消音 / C スクショ',
-   'ヌメリン・バチッコは 準備画面の「じゃま役」で出さないこともできる'].forEach((ln, i) => ctx.fillText(ln, W / 2, y + i * 20));
+   'ヌメリン・バチッコは 準備画面の「じゃま役」で出さないこともできる'].forEach((ln, i) => ctx.fillText(ln, W / 2, y + i * 18));
   ctx.fillStyle = '#6d7ba8'; ctx.font = "bold 12px 'Courier New', monospace";
   ctx.fillText('Z / X / タップ でもどる', W / 2, 762);
 }
@@ -6468,7 +6483,10 @@ function buildTowerFor(cells, own, team) {
   const outs = []; for (let i = 0; i < surf.N; i++) if (!inside[i]) outs.push(i);
   const d = bfsDist(outs);
   let best = cells[0], bd = -1;
-  for (const c of cells) if (d[c] > bd && !towers.some(T => T.c === c)) { bd = d[c]; best = c; }
+  // ほかのタワーから少し離れた、いちばん奥のマス(近すぎる場所しかなければ、重ならないところ)
+  const far = c => !towers.some(T => cellDist(T.c, c) < 3.5);
+  for (const c of cells) if (d[c] > bd && far(c)) { bd = d[c]; best = c; }
+  if (bd < 0) for (const c of cells) if (d[c] > bd && !towers.some(T => T.c === c)) { bd = d[c]; best = c; }
   const T = { c: best, own, team, lv, build: 0, cd: 0.8, ang: rand(0, Math.PI * 2), aimT: null, id: Math.random() };
   towers.push(T);
   // 1人 TOWER_MAX 基まで: こえたら古いものから撤去
@@ -6533,6 +6551,13 @@ function updateTowers(dt) {
   towerChkT -= dt; buildSndT -= dt; fireSndT -= dt;
   let building = false;
   for (const T of towers.slice()) {
+    // 乗っ取り: 敵が上塗りで足もとを走っている間、制御ゲージが減る。0 で乗っ取られる。やめればゆっくり戻る
+    const hm = towerHoldMax(T);
+    if (T.hold == null) T.hold = hm;
+    if (T.capT != null && blinkT - T.capT < 0.2 && T.capTeam !== T.team) { T.hold -= dt; if (T.hold <= 0) { hijackTower(T); continue; } }
+    else if (T.hold < hm) T.hold = Math.min(hm, T.hold + dt * 0.4);
+    if (T.kick > 0) T.kick = Math.max(0, T.kick - dt * 6);
+    if (T.flash > 0) T.flash -= dt;
     if (T.build < BUILD_T) {
       T.build += dt;
       if (T.own === 1) building = true;
@@ -6553,6 +6578,8 @@ function updateTowers(dt) {
     }
     T.cd -= dt;
     if (T.cd <= 0 && tg) { fireTower(T, tg, list); T.cd = TOWERS[T.lv].cd * rand(0.9, 1.1); }
+    // 近くに敵がいないときは、スプリンクラーのように少しずつ塗り広げる
+    if (!tg) { T.paintCd = (T.paintCd == null ? rand(0.5, 1.5) : T.paintCd) - dt; if (T.paintCd <= 0) { towerPaint(T); T.paintCd = TOWER_PAINT_CD[T.lv] * rand(0.85, 1.15); } }
   }
   if (building && buildSndT <= 0) { Snd.tick(false); buildSndT = 0.22; }   // トントン…(建設の音)
   // 弾
@@ -6578,8 +6605,92 @@ function updateTowers(dt) {
     for (const T of towers.slice()) if (grid[T.c] !== WALL || ownerTeam(ownA[T.c]) !== T.team) removeTower(T, true);
   }
 }
+// ---- 自動で塗る(近くに敵がいないとき) ----
+const TOWER_PAINT_CD = [2.6, 2.4, 2.2, 2.0, 1.9, 1.8, 1.6];   // 次に塗るまでの秒
+const TOWER_PAINT_R = [1, 1, 2, 2, 2, 3, 3];                    // 1回に塗る半径(マス)
+function towerPaintRad(T) { return Math.max(1, Math.round(TOWER_PAINT_R[T.lv] * towerScale())); }
+function nearQix(c, r) { return qixes.some(q => cellDist(c, surf.qixCell(q)) < r); }
+function touchesTeam(c, team) {
+  for (let k = 0; k < 4; k++) { const n = surf.nb[c * 4 + k]; if (n >= 0 && grid[n] === WALL && !baseA[n] && ownerTeam(ownA[n]) === team) return true; }
+  return false;
+}
+// 射程の中で、自分の陣地のとなりの空き地か中立の場所をねらって、インクを山なりに撃つ
+function towerPaint(T) {
+  const R = Math.max(2, Math.floor(towerRange(T) * 0.8)), cand = [];
+  for (const c of bfsNear(T.c, R)) {
+    if (grid[c] === OPEN) { if (touchesTeam(c, T.team) && !nearQix(c, 3)) cand.push(c); }
+    else if (grid[c] === WALL && ownA[c] === OWN_NEUTRAL && !baseA[c] && colA[c]) cand.push(c);
+  }
+  if (!cand.length) return false;
+  const c1 = pick(cand);
+  shots.push({ kind: 'ink', T, tg: null, c0: T.c, c1, t: 0, dur: 0.6 + cellDist(T.c, c1) / 90, col: teamHex(T.team), rad: towerPaintRad(T) });
+  T.kick = 0.5;
+  return true;
+}
+// インクが落ちたところを塗る: 空き地 → 自分の陣地 / 中立 → 自分の陣地。ふちは線(ネオン)にする
+let splatSndT = 0;
+function paintSplat(c1, rad, T) {
+  if (state !== 'play' || grid[T.c] !== WALL) return 0;
+  const painted = [];
+  for (const c of bfsNear(c1, rad)) {
+    if (items.some(it => it.c === c) || nearQix(c, 2.5)) continue;
+    if (grid[c] === OPEN) { grid[c] = WALL; ownA[c] = T.own; colA[c] = teamNo(T.team); mixA[c] = 0; claimAt[c] = blinkT; claimed++; painted.push(c); }
+    else if (grid[c] === WALL && ownA[c] === OWN_NEUTRAL && !baseA[c] && colA[c] && blinkT - neutralAt[c] > 1.2) { ownA[c] = T.own; colA[c] = teamNo(T.team); mixA[c] = 0; painted.push(c); }
+  }
+  if (!painted.length) return 0;
+  // ふち: 空き地や描きかけの線に面したマスは線に、もう面していない自分の線は陣地の色に
+  const touch = new Set();
+  for (const c of painted) { touch.add(c); for (let m = 0; m < 8; m++) { const n = surf.nb8[c * 8 + m]; if (n >= 0) touch.add(n); } }
+  for (const c of touch) {
+    if (grid[c] !== WALL || baseA[c] || ownA[c] !== T.own) continue;
+    let open = false, other = false;
+    for (let k = 0; k < 4; k++) { const n = surf.nb[c * 4 + k]; if (n >= 0 && grid[n] !== WALL) open = true; }
+    for (let m = 0; m < 8; m++) { const n = surf.nb8[c * 8 + m]; if (n >= 0 && grid[n] === WALL && !baseA[n] && ownA[n] !== T.own) other = true; }
+    if (open) { colA[c] = 0; mixA[c] = 0; }
+    else if (colA[c] === 0 && !other) colA[c] = teamNo(T.team);
+  }
+  recountAreas(); fieldDirty = true; lineCacheT = -99;
+  // 足場が陣地の中になった人は、近くの線へ
+  if (!player.drawing && deathTimer <= 0 && !isBoundary(player.c)) snapPlayerToBoundary();
+  for (const r of rivals) if (!r.drawing && r.dead <= 0 && !(r.overT > 0) && !isBoundary(r.c)) snapActor(r);
+  for (const sp of sparxes) if (!isBoundary(sp.c)) snapActor(sp);
+  const p = surf.screenOf(c1);
+  if (!surf.is3D || visA[c1]) {
+    for (let i = 0; i < 8; i++) particles.push({ x: p.x, y: p.y, vx: rand(-50, 50), vy: rand(-70, -10), t: rand(0.3, 0.6), col: teamHex(T.team), ink: true, r: rand(1.5, 2.8) });
+    if (splatSndT < blinkT) { Snd.splat(0.06); splatSndT = blinkT + 0.12; }
+  }
+  if (percent() >= matchTarget() && state === 'play') setTimeout0(() => { if (state === 'play') vsEnd(); });
+  return painted.length;
+}
+// ---- 乗っ取り ----
+function towerHoldMax(T) { return 1.6 + T.lv * 0.35; }
+// 上塗りでタワーの足もと(まん中から TOWER_CORE マス)は塗りかえられない。かわりに制御ゲージが減る
+const TOWER_CORE = 1.6;
+function towerCoreGuard(c, own, team) {
+  let hit = false;
+  for (const T of towers) {
+    if (T.team === team || cellDist(c, T.c) > TOWER_CORE) continue;
+    T.capOwn = own; T.capTeam = team; T.capT = blinkT; hit = true;
+  }
+  return hit;
+}
+function hijackTower(T) {
+  const oldOwn = T.own;
+  T.own = T.capOwn; T.team = T.capTeam; T.hold = towerHoldMax(T); T.capT = null;
+  T.build = BUILD_T * 0.6;                              // 相手の色で再起動(組み直しのアニメ)
+  for (const c of bfsNear(T.c, 1)) if (grid[c] === WALL && !baseA[c] && colA[c] !== 0 && colA[c] !== HOME_COL) { ownA[c] = T.own; colA[c] = teamNo(T.team); mixA[c] = 0; }
+  recountAreas(); fieldDirty = true; lineCacheT = -99;
+  const p = towerScreen(T), col = teamHex(T.team);
+  if (towerVisible(T)) { rings.push({ x: p.x, y: p.y, t: 0, col, R: 160, w: 1 }); spawnParticles(p.x, p.y, 24, col); }
+  if (T.own === 1) { floats.push({ x: p.x, y: p.y - 28, txt: TOWERS[T.lv].name + ' 乗っ取った!', t: 1.8, col, big: true }); Snd.fanfare(Bgm.root(), 1); unlock('hijack'); }
+  else if (oldOwn === 1) { floats.push({ x: p.x, y: p.y - 28, txt: TOWERS[T.lv].name + ' 乗っ取られた!', t: 1.8, col: '#ff8fa8', big: true }); Snd.over(); }
+  else Snd.select();
+  const mine = towers.filter(q => q.own === T.own);
+  if (mine.length > TOWER_MAX) removeTower(mine[0], false);
+}
 function fireTower(T, tg, list) {
   const D = TOWERS[T.lv], col = teamHex(T.team), c0 = T.c, c1 = tgCell(tg), dist = cellDist(c0, c1);
+  T.kick = 1; T.flash = 0.12;
   const vis = towerVisible(T);
   if (D.shot === 'bullet') {
     for (let i = 0; i < (D.n || 1); i++) shots.push({ kind: 'bullet', T, tg, c0, c1, t: 0, dur: Math.max(0.08, dist / 70), dmg: D.dmg, col, delay: i * 0.1, side: i ? 1 : -1 });
@@ -6613,12 +6724,13 @@ function shotPos(s) {
   const a = surf.screenOf(s.c0), b = (s.kind === 'missile' || s.kind === 'bullet') && tgAlive(s.tg) ? tgScreen(s.tg) : surf.screenOf(s.c1);
   const t = clamp(s.t, 0, 1), dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1;
   let x = a.x + dx * t, y = a.y + dy * t;
-  if (s.kind === 'shell') y -= Math.sin(Math.PI * t) * Math.min(90, 30 + L * 0.5);            // 山なり
+  if (s.kind === 'shell' || s.kind === 'ink') y -= Math.sin(Math.PI * t) * Math.min(90, 24 + L * 0.45);   // 山なり
   if (s.kind === 'missile') { const k = Math.sin(Math.PI * t) * Math.min(40, 10 + L * 0.25) * (s.side || 1); x += -dy / L * k; y += dx / L * k - Math.sin(Math.PI * t) * 12; }
   if (s.kind === 'bullet') { x += -dy / L * (s.side || 0) * 2.5; y += dx / L * (s.side || 0) * 2.5; }
   return { x, y, a, b };
 }
 function shotHit(s) {
+  if (s.kind === 'ink') { paintSplat(s.c1, s.rad, s.T); return; }
   if (s.kind === 'shell') {                           // 迫撃砲: 着弾点のまわりのみんなに当たる
     const p = surf.screenOf(s.c1);
     if (!surf.is3D || visA[s.c1]) { rings.push({ x: p.x, y: p.y, t: 0.2, col: s.col, R: 70, w: 0.8 }); spawnParticles(p.x, p.y, 14, '#c9a060'); }
@@ -6657,85 +6769,242 @@ function drawTowers() {
     drawTower(T, p.x, p.y, s);
   }
 }
-function drawTower(T, x, y, s) {
-  const lv = T.lv, col = teamHex(T.team), p = Math.min(1, T.build / BUILD_T);
-  const big = lv === 6 ? 1.35 : lv >= 4 ? 1.15 : 1, R = (surf.is3D ? 9 : 11) * s * big;
-  ctx.save(); ctx.translate(x, y);
-  ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.ellipse(0, R * 0.35, R * 1.2, R * 0.55, 0, 0, Math.PI * 2); ctx.fill();   // 影
-  if (p < 1) {
-    // 建設中: 足場の柱が伸び、横木が入り、本体がせり上がり、最後に砲台がつく
-    const k1 = Math.min(1, p / 0.35), hgt = R * 1.8 * k1;
-    ctx.strokeStyle = '#d8b56a'; ctx.lineWidth = Math.max(1, 1.2 * s);
-    ctx.beginPath();
-    for (const sx of [-1, 1]) { ctx.moveTo(sx * R, R * 0.4); ctx.lineTo(sx * R, R * 0.4 - hgt); }
-    for (let yy = R * 0.4; yy > R * 0.4 - hgt; yy -= R * 0.6) { ctx.moveTo(-R, yy); ctx.lineTo(R, yy); }
-    if (k1 >= 1) { ctx.moveTo(-R, R * 0.4); ctx.lineTo(R, R * 0.4 - hgt); }
-    ctx.stroke();
-    if (p > 0.35) {
-      const k2 = Math.min(1, (p - 0.35) / 0.4);
-      ctx.save(); ctx.beginPath(); ctx.rect(-R * 1.3, R * 0.9 - R * 2.2 * k2, R * 2.6, R * 2.2 * k2); ctx.clip();
-      drawTowerBase(lv, R, col, s);
-      ctx.restore();
+
+/* ---- タワーの絵(斜め上から見た立体風)。細かい絵は種類・チームごとに一度だけ描いてしまっておく ----
+   単位 U = 台座の半径(16)。SP = 1単位あたりの画素(下描きの細かさ) */
+const TW_U = 16, TW_SP = 3;
+const TOWER_BODY_H = [0.45, 0.45, 0.55, 0.62, 0.95, 1.1, 0.5];   // 砲台がのる高さ(U の何倍)
+const towerSprites = new Map();
+function towerSprite(key, w, h, draw) {
+  let c = towerSprites.get(key);
+  if (!c) {
+    c = (typeof document !== 'undefined' && document.createElement) ? document.createElement('canvas') : null;
+    if (!c) return null;
+    c.width = Math.ceil(w * TW_SP); c.height = Math.ceil(h * TW_SP);
+    const g = c.getContext && c.getContext('2d');
+    if (g && g.scale) { g.scale(TW_SP, TW_SP); draw(g); }
+    towerSprites.set(key, c);
+  }
+  return c;
+}
+// 金属の縦のグラデーション(左が暗く、少し左寄りにつや)
+function metalH(g, x0, x1, base) {
+  const gr = g.createLinearGradient(x0, 0, x1, 0);
+  gr.addColorStop(0, shade(base, 0.45)); gr.addColorStop(0.3, mixHex(base, '#ffffff', 0.35));
+  gr.addColorStop(0.55, base); gr.addColorStop(1, shade(base, 0.35));
+  return gr;
+}
+function metalV(g, y0, y1, base) {
+  const gr = g.createLinearGradient(0, y0, 0, y1);
+  gr.addColorStop(0, mixHex(base, '#ffffff', 0.4)); gr.addColorStop(0.45, base); gr.addColorStop(1, shade(base, 0.4));
+  return gr;
+}
+// 円柱(下の中心 cx,cy、半径 r、高さ h)
+function twCylinder(g, cx, cy, r, h, base, band) {
+  const ry = r * 0.45;
+  g.fillStyle = shade(base, 0.35); g.beginPath(); g.ellipse(cx, cy, r, ry, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = metalH(g, cx - r, cx + r, base); g.fillRect(cx - r, cy - h, r * 2, h);
+  g.beginPath(); g.ellipse(cx, cy, r, ry, 0, 0, Math.PI); g.fill();
+  if (band) { g.fillStyle = band; g.globalAlpha = 0.9; g.fillRect(cx - r, cy - h * 0.55, r * 2, h * 0.14); g.globalAlpha = 1; }
+  const tg = g.createLinearGradient(cx - r, cy - h - ry, cx + r, cy - h + ry);
+  tg.addColorStop(0, mixHex(base, '#ffffff', 0.55)); tg.addColorStop(1, shade(base, 0.7));
+  g.fillStyle = tg; g.beginPath(); g.ellipse(cx, cy - h, r, ry, 0, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = 'rgba(10,12,20,0.7)'; g.lineWidth = 0.5; g.stroke();
+}
+// 箱(下の中心、幅 w・奥行き d・高さ h)
+function twBox(g, cx, cy, w, d, h, base) {
+  const dy = d * 0.45;
+  g.fillStyle = metalV(g, cy - h, cy, base); g.fillRect(cx - w / 2, cy - h, w, h);                      // 手前の面
+  const tg = g.createLinearGradient(cx - w / 2, cy - h - dy, cx + w / 2, cy - h);
+  tg.addColorStop(0, mixHex(base, '#ffffff', 0.5)); tg.addColorStop(1, shade(base, 0.8));
+  g.fillStyle = tg; g.fillRect(cx - w / 2, cy - h - dy, w, dy);                                         // 上の面
+  g.strokeStyle = 'rgba(10,12,20,0.75)'; g.lineWidth = 0.5; g.strokeRect(cx - w / 2, cy - h - dy, w, dy + h);
+  g.strokeStyle = 'rgba(255,255,255,0.35)'; g.beginPath(); g.moveTo(cx - w / 2, cy - h); g.lineTo(cx + w / 2, cy - h); g.stroke();   // 角のつや
+}
+function twRivet(g, x, y) {
+  g.fillStyle = '#20243a'; g.beginPath(); g.arc(x, y, 0.9, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#aab3cf'; g.beginPath(); g.arc(x - 0.3, y - 0.3, 0.45, 0, Math.PI * 2); g.fill();
+}
+// 台座 + 本体(動かない部分)。地面の中心が (w/2, h - 6)
+function towerBaseSprite(lv, team) {
+  const U = TW_U, W2 = U * 2 + 10, H2 = U * 2 + U * 2.2 + 10, big = lv === 6;
+  return towerSprite('b' + lv + ':' + team, W2, H2, g => {
+    const cx = W2 / 2, cy = H2 - U - 4, col = teamHex(team), steel = '#565e7c';
+    // 台座: 厚みのある八角形(四角)の板
+    const poly = (r, dy) => { g.beginPath(); for (let i = 0; i < 8; i++) { const a = Math.PI / 8 + i * Math.PI / 4; g.lineTo(cx + Math.cos(a) * r, cy + dy + Math.sin(a) * r * 0.5); } g.closePath(); };
+    const sq = (r, dy) => { g.beginPath(); g.rect(cx - r, cy + dy - r * 0.5, r * 2, r); };
+    const shape = big ? sq : poly, R0 = big ? U * 1.05 : U;
+    g.fillStyle = '#161a28'; shape(R0, 3); g.fill();                                   // 側面(厚み)
+    const tg = g.createLinearGradient(cx - R0, cy - R0 * 0.5, cx + R0, cy + R0 * 0.5);
+    tg.addColorStop(0, '#6d7695'); tg.addColorStop(0.5, '#3c4460'); tg.addColorStop(1, '#232840');
+    g.fillStyle = tg; shape(R0, 0); g.fill();
+    g.strokeStyle = 'rgba(200,210,240,0.45)'; g.lineWidth = 0.7; shape(R0 * 0.86, 0); g.stroke();   // 面取りのつや
+    g.strokeStyle = '#0b0d16'; g.lineWidth = 0.8; shape(R0, 0); g.stroke();
+    // チームの色に光る輪
+    g.save(); g.shadowColor = col; g.shadowBlur = 4; g.strokeStyle = col; g.lineWidth = 1.3;
+    g.beginPath(); g.ellipse(cx, cy, R0 * 0.72, R0 * 0.36, 0, 0, Math.PI * 2); g.stroke(); g.restore();
+    // 黄色と黒の注意の縞(手前だけ)
+    for (let i = 0; i < 6; i++) { g.fillStyle = i % 2 ? '#1a1a1a' : '#e8c44a'; g.fillRect(cx - R0 * 0.45 + i * R0 * 0.15, cy + R0 * 0.33, R0 * 0.15, 1.4); }
+    for (let i = 0; i < 8; i++) { const a = Math.PI / 8 + i * Math.PI / 4; twRivet(g, cx + Math.cos(a) * R0 * 0.88, cy + Math.sin(a) * R0 * 0.44); }
+    // 本体
+    const hb = TOWER_BODY_H[lv] * U;
+    if (lv === 0 || lv === 1) twCylinder(g, cx, cy, U * 0.55, hb, steel, col);
+    else if (lv === 2) { twBox(g, cx, cy + 1, U * 1.0, U * 0.9, hb, steel); g.fillStyle = col; g.fillRect(cx - U * 0.5, cy + 1 - hb * 0.5, U * 1.0, 1.2); }
+    else if (lv === 3) {                               // 迫撃砲: 太い台に、上を向いた筒
+      twCylinder(g, cx, cy, U * 0.68, U * 0.3, steel, col);
+      twCylinder(g, cx + 1, cy - U * 0.3, U * 0.34, U * 0.32, '#474e68');
+      g.fillStyle = '#05060a'; g.beginPath(); g.ellipse(cx + 1, cy - U * 0.62, U * 0.24, U * 0.1, 0, 0, Math.PI * 2); g.fill();
+    } else if (lv === 4) {                             // レーザー: 先細りの柱に光る縦の筋
+      const r1 = U * 0.56, r2 = U * 0.36;
+      g.fillStyle = metalH(g, cx - r1, cx + r1, '#6a7394');
+      g.beginPath(); g.moveTo(cx - r1, cy); g.lineTo(cx - r2, cy - hb); g.lineTo(cx + r2, cy - hb); g.lineTo(cx + r1, cy); g.closePath(); g.fill();
+      g.save(); g.shadowColor = col; g.shadowBlur = 3; g.strokeStyle = col; g.lineWidth = 0.9;
+      for (const f of [-0.35, 0.35]) { g.beginPath(); g.moveTo(cx + r1 * f, cy - 1); g.lineTo(cx + r2 * f, cy - hb + 1); g.stroke(); }
+      g.restore();
+      g.fillStyle = '#9aa4c4'; g.beginPath(); g.ellipse(cx, cy - hb, r2, r2 * 0.45, 0, 0, Math.PI * 2); g.fill();
+    } else if (lv === 5) {                             // テスラ: 細い柱に白い碍子(がいし)を重ねる
+      twCylinder(g, cx, cy, U * 0.26, hb, '#555d7a');
+      for (let i = 0; i < 4; i++) {
+        const y = cy - hb * (0.2 + i * 0.22), r = U * (0.5 - i * 0.05);
+        const cg = g.createLinearGradient(cx - r, 0, cx + r, 0);
+        cg.addColorStop(0, '#9aa0b0'); cg.addColorStop(0.35, '#f4f6fb'); cg.addColorStop(1, '#8a90a0');
+        g.fillStyle = cg; g.beginPath(); g.ellipse(cx, y, r, r * 0.3, 0, 0, Math.PI * 2); g.fill();
+        g.strokeStyle = col; g.lineWidth = 0.6; g.stroke();
+      }
+    } else if (lv === 6) {                             // 要塞: 大きな掩体とミサイルのふた
+      g.fillStyle = '#2d3348'; g.fillRect(cx - U * 0.95, cy + 2 - hb - 1, U * 1.9, 1.2);
+      twBox(g, cx, cy + 2, U * 1.7, U * 1.5, hb, '#4d5570');
+      const top = cy + 2 - hb - U * 1.5 * 0.45 / 2;
+      for (const [dx, dy] of [[-0.5, -0.12], [0.5, -0.12], [-0.5, 0.12], [0.5, 0.12]]) {
+        g.fillStyle = '#10131e'; g.beginPath(); g.ellipse(cx + dx * U, top + dy * U * 2, U * 0.2, U * 0.09, 0, 0, Math.PI * 2); g.fill();
+        g.strokeStyle = col; g.lineWidth = 0.6; g.stroke();
+      }
+      g.fillStyle = col; g.fillRect(cx - U * 0.85, cy + 2 - hb * 0.45, U * 1.7, 1.3);
     }
-    if (p > 0.75) { const k3 = (p - 0.75) / 0.25; ctx.scale(k3, k3); drawTowerTop(T, R, col, s); }
-    // 溶接の火花(小さな点。光らせない)
-    if (Math.random() < 0.5) { ctx.fillStyle = '#ffd98a'; ctx.fillRect(rand(-R, R), rand(-R, R * 0.4), 1.5 * s, 1.5 * s); }
-    // 進み具合のバー(砲台の縮小を戻してから)
-    ctx.restore(); ctx.save(); ctx.translate(x, y);
-    ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(-R, R + 3, R * 2, 3 * s);
-    ctx.fillStyle = col; ctx.fillRect(-R, R + 3, R * 2 * p, 3 * s);
-  } else {
-    drawTowerBase(lv, R, col, s);
-    drawTowerTop(T, R, col, s);
-  }
-  ctx.restore();
+    // 汚れ・ざらつき(決まった並びの細かい点)と、足もとの影(本体と台座のさかいめ)
+    const ao = g.createRadialGradient(cx, cy, U * 0.3, cx, cy, U * 0.8);
+    ao.addColorStop(0, 'rgba(0,0,0,0)'); ao.addColorStop(1, 'rgba(0,0,0,0)');
+    let sd = lv * 97 + team * 13 + 7;
+    const rnd = () => { sd = (sd * 16807) % 2147483647; return sd / 2147483647; };
+    g.globalCompositeOperation = 'source-atop';
+    for (let i = 0; i < 140; i++) { g.fillStyle = rnd() < 0.5 ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.08)'; g.fillRect(rnd() * W2, rnd() * H2, 0.6, 0.6); }
+    g.globalCompositeOperation = 'source-over';
+  });
 }
-// 台座: 暗い金属の円盤に、チームの色の輪
-function drawTowerBase(lv, R, col, s) {
-  ctx.beginPath();
-  if (lv === 6) ctx.rect(-R, -R, R * 2, R * 2); else ctx.arc(0, 0, R, 0, Math.PI * 2);
-  ctx.fillStyle = '#262b40'; ctx.fill();
-  ctx.strokeStyle = '#0a0c14'; ctx.lineWidth = Math.max(2, 4.5 * s); ctx.stroke();      // 黒いふちで柄の上でも目立つ
-  ctx.strokeStyle = col; ctx.lineWidth = Math.max(1.5, 2.4 * s); ctx.stroke();
-  ctx.fillStyle = 'rgba(255,255,255,0.10)'; ctx.beginPath(); ctx.arc(-R * 0.3, -R * 0.35, R * 0.45, 0, Math.PI * 2); ctx.fill();   // つや
+// 砲台(回る部分)。右向きに描く。回る中心が画像のまん中
+function towerTurretSprite(lv, team) {
+  const U = TW_U, S = U * 2.6;
+  return towerSprite('t' + lv + ':' + team, S, S, g => {
+    const cx = S / 2, cy = S / 2, col = teamHex(team);
+    const barrel = (y, len, w) => {
+      g.fillStyle = metalV(g, y - w / 2, y + w / 2, '#6b7496'); g.fillRect(cx, y - w / 2, len, w);
+      g.fillStyle = '#2a2f45'; g.fillRect(cx + len - 2.2, y - w / 2 - 0.6, 2.2, w + 1.2);            // 銃口のブレーキ
+      g.strokeStyle = 'rgba(10,12,20,0.8)'; g.lineWidth = 0.4; g.strokeRect(cx, y - w / 2, len, w);
+    };
+    const housing = (w, h, base) => {
+      g.fillStyle = metalV(g, cy - h / 2, cy + h / 2, base);
+      g.beginPath(); g.moveTo(cx - w * 0.5, cy - h * 0.35); g.lineTo(cx - w * 0.3, cy - h / 2); g.lineTo(cx + w * 0.45, cy - h / 2);
+      g.lineTo(cx + w * 0.55, cy - h * 0.2); g.lineTo(cx + w * 0.55, cy + h * 0.2); g.lineTo(cx + w * 0.45, cy + h / 2); g.lineTo(cx - w * 0.3, cy + h / 2); g.lineTo(cx - w * 0.5, cy + h * 0.35); g.closePath(); g.fill();
+      g.strokeStyle = '#0b0d16'; g.lineWidth = 0.6; g.stroke();
+      g.strokeStyle = 'rgba(255,255,255,0.35)'; g.lineWidth = 0.5; g.beginPath(); g.moveTo(cx - w * 0.3, cy - h / 2 + 0.6); g.lineTo(cx + w * 0.42, cy - h / 2 + 0.6); g.stroke();
+    };
+    if (lv === 0) { barrel(cy, U * 1.05, U * 0.2); housing(U * 0.8, U * 0.62, '#7a84a6'); g.fillStyle = col; g.fillRect(cx - U * 0.3, cy + U * 0.18, U * 0.3, U * 0.12); }
+    else if (lv === 1) { barrel(cy - U * 0.15, U * 1.1, U * 0.17); barrel(cy + U * 0.15, U * 1.1, U * 0.17); housing(U * 0.85, U * 0.72, '#7a84a6'); g.fillStyle = col; g.fillRect(cx - U * 0.36, cy - U * 0.06, U * 0.22, U * 0.12); }
+    else if (lv === 2 || lv === 6) {                   // ミサイルの箱と弾頭
+      const w = U * (lv === 6 ? 1.0 : 0.95), h = U * (lv === 6 ? 1.0 : 0.85);
+      housing(w, h, '#6f7898');
+      const n = lv === 6 ? 3 : 2;
+      for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+        const x = cx + w * (0.05 + 0.35 * j / Math.max(1, n - 1)), y = cy - h * 0.28 + h * 0.56 * i / (n - 1);
+        g.fillStyle = '#9aa3c0'; g.beginPath(); g.arc(x, y, U * 0.13, 0, Math.PI * 2); g.fill();          // 筒のふち
+        g.fillStyle = '#05070c'; g.beginPath(); g.arc(x + 0.25, y + 0.2, U * 0.1, 0, Math.PI * 2); g.fill();   // 筒の奥
+        g.fillStyle = col; g.beginPath(); g.arc(x + 0.5, y + 0.1, U * 0.06, 0, Math.PI * 2); g.fill();         // 弾頭
+        g.fillStyle = 'rgba(255,255,255,0.6)'; g.beginPath(); g.arc(x + 0.2, y - 0.2, U * 0.02 + 0.2, 0, Math.PI * 2); g.fill();
+      }
+    } else if (lv === 4) {                             // レーザー: 小さな箱から長い砲身。光るコイル
+      housing(U * 0.62, U * 0.66, '#8a93b4');
+      barrel(cy, U * 1.25, U * 0.24);
+      g.save(); g.shadowColor = col; g.shadowBlur = 3;
+      for (let i = 0; i < 3; i++) { g.fillStyle = mixHex(col, '#ffffff', 0.25); g.fillRect(cx + U * (0.42 + i * 0.22), cy - U * 0.19, U * 0.07, U * 0.38); }
+      g.restore();
+      g.fillStyle = '#20263a'; g.beginPath(); g.arc(cx + U * 1.25, cy, U * 0.16, 0, Math.PI * 2); g.fill();
+    }
+  });
 }
-// 砲台: 種類ごとの形。ねらっている向きへ回る
-function drawTowerTop(T, R, col, s) {
-  const lv = T.lv, lw = Math.max(1, 1.4 * s);
-  ctx.lineWidth = lw; ctx.strokeStyle = '#141824';
-  if (lv === 3) {                                    // 迫撃砲: 上を向いた太い筒
-    ctx.fillStyle = '#5a627e'; ctx.beginPath(); ctx.arc(0, 0, R * 0.62, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#0c0f18'; ctx.beginPath(); ctx.arc(0, 0, R * 0.34, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = col; ctx.beginPath(); ctx.arc(0, 0, R * 0.62, 0, Math.PI * 2); ctx.stroke();
+function drawTowerArt(T, x, y, R, p) {
+  const lv = T.lv, k = R / TW_U, col = teamHex(T.team), hb = TOWER_BODY_H[lv] * TW_U * k;
+  const bs = towerBaseSprite(lv, T.team), ts = [0, 1, 2, 4, 6].includes(lv) ? towerTurretSprite(lv, T.team) : null;
+  const bw = bs ? bs.width / TW_SP * k : 0, bh = bs ? bs.height / TW_SP * k : 0;
+  const bx = x - bw / 2, by = y - bh + (TW_U + 4) * k;
+  // 影(右下へ落ちる)
+  ctx.fillStyle = 'rgba(0,0,0,0.38)'; ctx.beginPath(); ctx.ellipse(x + R * 0.3, y + R * 0.28, R * 1.25, R * 0.62, 0, 0, Math.PI * 2); ctx.fill();
+  if (p < 1) {                                       // 建設中
+    const k1 = Math.min(1, p / 0.3), sh = R * 2.4 * k1;
+    ctx.strokeStyle = '#d8b56a'; ctx.lineWidth = Math.max(1, k * 0.9);
+    ctx.beginPath();
+    for (const sx of [-1, 1]) for (const sz of [-0.35, 0.35]) { ctx.moveTo(x + sx * R * 0.9, y + sz * R); ctx.lineTo(x + sx * R * 0.9, y + sz * R - sh); }
+    for (let yy = 0; yy < sh; yy += R * 0.55) { ctx.moveTo(x - R * 0.9, y + R * 0.35 - yy); ctx.lineTo(x + R * 0.9, y + R * 0.35 - yy); }
+    if (k1 >= 1) { ctx.moveTo(x - R * 0.9, y + R * 0.35); ctx.lineTo(x + R * 0.9, y + R * 0.35 - sh); }
+    ctx.stroke();
+    if (p > 0.3 && bs) {                               // 本体が下からせり上がる
+      const k2 = Math.min(1, (p - 0.3) / 0.45);
+      ctx.save(); ctx.beginPath(); ctx.rect(bx - 2, by + bh * (1 - k2) - 2, bw + 4, bh * k2 + 4); ctx.clip();
+      ctx.drawImage(bs, bx, by + bh * (1 - k2) * 0.25, bw, bh); ctx.restore();
+    }
+    if (p > 0.75 && ts) { const k3 = (p - 0.75) / 0.25, tw = ts.width / TW_SP * k * k3; ctx.save(); ctx.translate(x, y - hb); ctx.rotate(T.ang); ctx.drawImage(ts, -tw / 2, -tw / 2, tw, tw); ctx.restore(); }
+    for (let i = 0; i < 2; i++) if (Math.random() < 0.6) { ctx.fillStyle = i ? '#ffe9a8' : '#ffb04a'; ctx.fillRect(x + rand(-R, R), y - rand(0, sh), 1.6, 1.6); }   // 溶接の火花
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y + R * 0.9, R * 0.35, -Math.PI / 2, Math.PI * 1.5); ctx.stroke();
+    ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y + R * 0.9, R * 0.35, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * p); ctx.stroke();
     return;
   }
-  if (lv === 5) {                                    // テスラコイル: 重なった輪と玉
-    ctx.strokeStyle = col;
-    for (let i = 0; i < 3; i++) { ctx.globalAlpha = 0.9 - i * 0.2; ctx.beginPath(); ctx.arc(0, -i * R * 0.18, R * (0.7 - i * 0.16), 0, Math.PI * 2); ctx.stroke(); }
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = mixHex(col, '#ffffff', 0.55); ctx.beginPath(); ctx.arc(0, -R * 0.5, R * 0.3, 0, Math.PI * 2); ctx.fill();
-    return;
+  if (bs) ctx.drawImage(bs, bx, by, bw, bh);
+  // 状態のランプ(ゆっくり明るくなったり暗くなったり。点滅はしない)
+  const breathe = 0.55 + 0.45 * Math.sin(blinkT * 2.4 + T.id * 9);
+  ctx.globalAlpha = breathe; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x + R * 0.55, y + R * 0.2, Math.max(1, k * 1.1), 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1;
+  const kick = T.kick || 0, dx = Math.cos(T.ang), dy = Math.sin(T.ang);
+  if (ts) {
+    const tw = ts.width / TW_SP * k, ox = -dx * kick * R * 0.25, oy = -dy * kick * R * 0.25;   // 撃つと反動で下がる
+    ctx.save(); ctx.translate(x + ox, y - hb + oy); ctx.rotate(T.ang); ctx.drawImage(ts, -tw / 2, -tw / 2, tw, tw); ctx.restore();
   }
-  ctx.save(); ctx.rotate(T.ang);
-  if (lv === 0 || lv === 1) {                        // 機銃・ツイン機銃
-    ctx.fillStyle = '#1b2030';
-    const bs = lv === 1 ? [-R * 0.22, R * 0.22] : [0];
-    for (const o of bs) { ctx.fillRect(0, o - R * 0.13, R * 1.25, R * 0.26); }
-    ctx.fillStyle = '#9aa3bd'; ctx.beginPath(); ctx.arc(0, 0, R * 0.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  } else if (lv === 2 || lv === 6) {                 // ミサイルランチャー・要塞ミサイル: 箱に弾頭
-    const w = R * (lv === 6 ? 1.3 : 1.1), h = R * (lv === 6 ? 1.3 : 0.95);
-    ctx.fillStyle = '#6b7390'; ctx.fillRect(-w / 2, -h / 2, w, h); ctx.strokeRect(-w / 2, -h / 2, w, h);
-    ctx.fillStyle = col;
-    const n = lv === 6 ? 3 : 2;
-    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { ctx.beginPath(); ctx.arc(w / 2 - R * 0.12, -h / 2 + h * (i + 0.5) / n, R * 0.12, 0, Math.PI * 2); ctx.fill(); }
-    if (lv === 6) { ctx.strokeStyle = col; ctx.beginPath(); ctx.arc(-w * 0.15, 0, R * 0.3, 0, Math.PI * 2); ctx.stroke(); }
-  } else if (lv === 4) {                             // レーザー砲台: ひし形とレンズ
-    ctx.fillStyle = '#b8c0da';
-    ctx.beginPath(); ctx.moveTo(R * 0.8, 0); ctx.lineTo(0, R * 0.55); ctx.lineTo(-R * 0.6, 0); ctx.lineTo(0, -R * 0.55); ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = col; ctx.beginPath(); ctx.arc(R * 0.25, 0, R * 0.25, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(R * 0.25, 0, R * 0.1, 0, Math.PI * 2); ctx.fill();
+  // 種類ごとの動き
+  const tipLen = [1.05, 1.1, 0.5, 0, 1.2, 0, 0.5][lv] * TW_U * k;
+  if (lv === 4) {                                    // レーザー: 撃つ前に先がゆっくり明るくなる
+    const ch = clamp(1 - T.cd / TOWERS[4].cd, 0, 1);
+    glowDot(x + dx * tipLen, y - hb + dy * tipLen, R * (0.25 + 0.3 * ch), col, 0.25 + 0.6 * ch);
   }
-  ctx.restore();
+  if (lv === 5) {                                    // テスラ: 玉と、ゆっくり回る小さな火花
+    const oy = y - hb - R * 0.3, pr = R * (0.36 + 0.04 * Math.sin(blinkT * 2));
+    glowDot(x, oy, pr * 2.1, col, 0.35);
+    const og = ctx.createRadialGradient(x - pr * 0.3, oy - pr * 0.3, pr * 0.1, x, oy, pr);
+    og.addColorStop(0, '#ffffff'); og.addColorStop(0.5, mixHex(col, '#ffffff', 0.5)); og.addColorStop(1, shade(col, 0.6));
+    ctx.fillStyle = og; ctx.beginPath(); ctx.arc(x, oy, pr, 0, Math.PI * 2); ctx.fill();
+    for (let i = 0; i < 2; i++) { const a = blinkT * 1.6 + i * Math.PI; ctx.fillStyle = mixHex(col, '#ffffff', 0.7); ctx.fillRect(x + Math.cos(a) * pr * 1.6 - 1, oy + Math.sin(a) * pr * 0.7 - 1, 2, 2); }
+  }
+  if (lv === 6) {                                    // 要塞: レーダーがゆっくり回る
+    const mx = x - R * 0.55, my = y - hb - R * 0.35, a = blinkT * 1.4;
+    ctx.strokeStyle = '#8a93b4'; ctx.lineWidth = Math.max(1, k * 0.7); ctx.beginPath(); ctx.moveTo(mx, my + R * 0.3); ctx.lineTo(mx, my); ctx.stroke();
+    ctx.fillStyle = '#c9cfe4'; ctx.beginPath(); ctx.ellipse(mx, my, R * 0.35 * Math.abs(Math.cos(a)) + 1, R * 0.16, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = col; ctx.beginPath(); ctx.arc(mx, my, Math.max(1, k), 0, Math.PI * 2); ctx.fill();
+  }
+  if (T.flash > 0 && tipLen > 0) glowDot(x + dx * tipLen, y - hb + dy * tipLen, R * 0.45, col, T.flash / 0.12 * 0.7);   // 砲口の光(小さく、すぐ消える)
+  // 乗っ取られかけ: 残りの制御ゲージの輪
+  if (T.hold < towerHoldMax(T) - 0.01) {
+    const f = clamp(T.hold / towerHoldMax(T), 0, 1);
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 4; ctx.beginPath(); ctx.ellipse(x, y, R * 1.25, R * 0.62, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = T.capTeam != null ? teamHex(T.capTeam) : '#ffffff'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.ellipse(x, y, R * 1.25, R * 0.62, 0, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - f)); ctx.stroke();
+  }
+}
+function glowDot(x, y, r, col, a) {
+  if (a <= 0.01 || r <= 0.5) return;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, rgbaHex('#ffffff', Math.min(1, a))); g.addColorStop(0.35, rgbaHex(col, Math.min(1, a * 0.8))); g.addColorStop(1, rgbaHex(col, 0));
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = g; ctx.fillRect(x - r, y - r, r * 2, r * 2); ctx.restore();
+}
+
+function drawTower(T, x, y, s) {
+  const big = T.lv === 6 ? 1.3 : T.lv >= 4 ? 1.12 : 1, R = (surf.is3D ? 14 : 18) * s * big;
+  drawTowerArt(T, x, y, R, Math.min(1, T.build / BUILD_T));
 }
 function drawShots() {
   if (lapsePlay || !shots.length) return;
@@ -6762,6 +7031,10 @@ function drawShots() {
       ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(g.x, g.y, 5 * s.t, 2.5 * s.t, 0, 0, Math.PI * 2); ctx.fill();   // 着弾点の影
       ctx.fillStyle = '#3a3f52'; ctx.beginPath(); ctx.arc(p.x, p.y, 3.4, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = s.col; ctx.lineWidth = 1; ctx.stroke();
+    } else if (s.kind === 'ink') {                   // インクのかたまり(チームの色、つや)
+      ctx.fillStyle = shade(s.col, 0.55); ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = s.col; ctx.beginPath(); ctx.arc(p.x - 0.5, p.y - 0.5, 3.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.beginPath(); ctx.arc(p.x - 1.4, p.y - 1.5, 1.1, 0, Math.PI * 2); ctx.fill();
     } else if (s.kind === 'beam') {                  // ビーム: チームの色の帯と白い芯。ゆっくり消える(点滅しない)
       const k = s.done ? Math.max(0, 1 - (s.t - 1) / 2) : 1, a = p.a, b = surf.screenOf(s.c1);
       ctx.globalAlpha = 0.5 * k; ctx.strokeStyle = s.col; ctx.lineWidth = 7; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
