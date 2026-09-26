@@ -1,16 +1,28 @@
-# NAWABARI 引き継ぎメモ(QLAIM 2 から切り出し)
+# NAWABARI DEFENSE(ナワバリディフェンス)引き継ぎメモ
 
 > **返事は必ず日本語で書く。** 途中の一言(「〜を確認します」など)・報告・質問もすべて日本語。長い作業のあとでも英語に切り替えない。
 > オーナーはこれまで何度も「英語になってる」と注意している。いちばん大事な約束。
 
 ## 目標
-QLAIM 2(`C:\Users\sisho\Desktop\qlaim2`、GitHub `hacchake/qlaim2`)は機能が増えすぎた。
-そこから **ナワバリバトルだけを切り出して、ひとつのゲーム「NAWABARI」にする**。
+NAWABARI(ナワバリバトル、`C:\Users\sisho\Desktop\nawabari`、タグ v1-battle)を土台に、
+**陣地を取ると広さに応じたタワーが建って侵入者を撃つ「ナワバリディフェンス」**へ大きく作り変える。
 
-- このフォルダ `C:\Users\sisho\Desktop\nawabari` は qlaim2 のコミット f846ea0 を履歴ごと複製したもの(まだ何も削っていない)。
-- GitHub: `https://github.com/hacchake/nawabari`(空のリポジトリ。remote `origin` は設定済み)。
-- 公開先(GitHub Pages): `https://hacchake.github.io/nawabari/`(push 後、オーナーが Settings → Pages で main / root を有効にする)。
-- QLAIM 1(`hacchake/qlaim`、タグ v1)と QLAIM 2 はそのまま残す。こちらの作業で触らない。
+- このフォルダ `C:\Users\sisho\Desktop\nawabari-defense` は nawabari を履歴ごと複製したもの(2026-09-26)。
+- GitHub: `https://github.com/hacchake/nawabari-defense`(remote `origin` は設定済み。**GitHub 側の空リポジトリはオーナーが作る**)。
+- 公開先(GitHub Pages): `https://hacchake.github.io/nawabari-defense/`(push 後、Settings → Pages で main / root)。
+- 保存キーは `nwdef.`(ナワバリバトルと混ざらない)。ブラウザで見るときはポート 8780。
+- NAWABARI・QLAIM 1・2 はそのまま残す。こちらの作業で触らない。
+
+### オーナーの決定(2026-09-26)
+- CPU もタワーを建てる / タワーが撃つ相手は設定で切替(ファイターだけ ⇔ ファイター+ヌメリン・バチッコ)
+- タワーは一度に囲んだ広さで7段階(`TOWERS`)/ BGM・効果音は当面そのまま
+
+### タワーの仕組み(index.html の「タワー(ナワバリディフェンス)」)
+- `buildTowerFor(cells, own, team)`: 囲んだ広さ → `towerTier` → 陣地の奥(`bfsDist`)に建設。`BUILD_T` 秒の建設アニメ
+- `updateTowers(dt)`: ねらう(`towerEnemies` / `nearestEnemy`、射程は `towerRange` = 基本射程 × `towerScale`)→ `fireTower` → 弾 `shots`(bullet / missile / shell / beam / zap)→ `hurtTarget`
+- 体力 `FIGHTER_HP`(自機 `player.hp`・CPU `r.hp`)、`HP_REGEN_WAIT` 秒で回復。0 で `death` / `rivalFail(r, 'tower', 持ち主)`
+- タワーの下の陣地の持ち主が変わるとこわれる(`removeTower`)。1人 `TOWER_MAX` 基まで
+- 描画: `drawTowers` / `drawTower`(台座 `drawTowerBase` + 種類ごとの砲台 `drawTowerTop`)/ `drawShots` / `drawHpBars`
 
 ## オーナーについて(大事)
 - 返事はすべて日本語(上のとおり)。
