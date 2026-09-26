@@ -1757,7 +1757,7 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
     for (let i = 0; i < 60 * (WAVE_FIRST - WAVE_WARN) + 30; i++) { blinkT += 1 / 60; updateInvaders(1 / 60); }
     assert(sk + ': ウェーブの前ぶれ(出てくる場所)', !!waveSpawns && waveSpawns.length > 0 && invaders.length === 0);
     for (let i = 0; i < 60 * 3; i++) { blinkT += 1 / 60; updateInvaders(1 / 60); }
-    assert(sk + ': ウェーブ1で侵略 buddyが来る', waveN === 1 && invaders.length >= 5 && invaders.every(v => grid[v.c] === OPEN || grid[v.c] === TRAIL), invaders.length);
+    assert(sk + ': ウェーブ1で侵略 buddyが来る', waveN === 1 && invaders.length >= 3 && new Set(invaders.map(v => v.k)).size === invaders.length && invaders.every(v => grid[v.c] === OPEN || grid[v.c] === TRAIL), invaders.length);
     const a0 = playerArea();
     let err = null;
     try { for (let i = 0; i < 60 * 60 && playerArea() >= a0; i++) { blinkT += 1 / 60; updateInvaders(1 / 60); } render(); } catch (e) { err = e.stack; }
@@ -1773,7 +1773,7 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
     hurtTarget({ type: 'i', ref: v }, 99, T);
     assert(sk + ': 体力が0で退治', !invaders.includes(v));
     // 空き地ごと囲むと退治
-    const w = invaders[0]; w.k = 'duck'; w.chew = 0; grid[w.c] = WALL; ownA[w.c] = 1; colA[w.c] = teamNo(0); claimed++; const k0 = vsStat.repel || 0;
+    const w = invaders[0]; w.k = 'duck'; w.chew = 0; w.hp = w.hpMax * 0.5; w.crushT = -99; grid[w.c] = WALL; ownA[w.c] = 1; colA[w.c] = teamNo(0); claimed++; const k0 = vsStat.repel || 0;
     crushInvaders(1);
     assert(sk + ': 囲まれた侵略 buddyは退治(自分の手柄)', !invaders.includes(w) && (vsStat.repel || 0) === k0 + 1);
     // 描きかけの線を踏まれるとやられる
@@ -1817,7 +1817,7 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   const tu = makeInvader('turtle', open); const t0 = tu.hp; hurtInvader(tu, 2, 1); assert('カメ: ダメージ半分', Math.abs(t0 - tu.hp - 1) < 1e-6);
   // ブロブ: 倒すと2匹に分裂
   invaders = []; const bl = makeInvader('blob', open); invaders.push(bl); killInvader(bl, 1);
-  assert('ブロブ: 倒すと2匹に分裂(小さい方はもう分裂しない)', invaders.length === 2 && invaders.every(u => u.small));
+  assert('ブロブ: 一度だけ復活する', invaders.length === 1 && bl.revived && bl.hp > 0); killInvader(bl, 1); assert('ブロブ: 2度目は倒れる', invaders.length === 0);
   // フクロウ: 陣地の上を飛ぶ(囲まれても退治されない)
   invaders = []; const ow = makeInvader('owl', cells[5]); invaders.push(ow); crushInvaders(1);
   assert('フクロウ: 飛んでいるので囲まれても退治されない', invaders.includes(ow));
@@ -1832,10 +1832,13 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   for (let i = 0; i < 60; i++) updateInvaders(1 / 60);
   assert('ドラゴン: 火の玉でタワーを焼く', T.hp < towerHpMax(T) || !towers.includes(T));
   // 5回に1回はドラゴン、後のウェーブほどレア度の高い種
-  waveN = 4; assert('5回目のウェーブはドラゴンが先頭', waveKinds(5)[0] === 'dragon');
+  waveN = 4; invaders = []; assert('5回目のウェーブはドラゴンが先頭', waveKinds(5)[0] === 'dragon');
   waveN = 0; assert('最初のウェーブはレア度1の種だけ', waveKinds(30).every(k => INV_TYPES[k].rar <= 1));
+  waveN = 20; invaders = []; { const ks = waveKinds(30); assert('ウェーブの顔ぶれは各種1体ずつ(重なりなし)', new Set(ks).size === ks.length && ks.length >= 16, ks.join()); }
+  invaders = [makeInvader('duck', open)]; assert('盤面にいる種は来ない', !waveKinds(30).includes('duck')); invaders = [];
   let err = null; try { invaders = []; let i = 0; for (const k in INV_TYPES) invaders.push(makeInvader(k, cells[(i++ * 7) % cells.length])); render(); } catch (e) { err = e.stack; }
   assert('18種の描画', !err, err);
+  { let oc = -1; for (let i = 0; i < surf.N && oc < 0; i++) if (grid[i] === OPEN && [0,1,2,3,4,5,6,7].every(m => surf.nb8[i * 8 + m] >= 0 && grid[surf.nb8[i * 8 + m]] === OPEN)) oc = i; player.drawing = false; player.c = oc; snapPlayerToBoundary(); assert('足もとが空き地でも、一番近い線へ戻れる', isBoundary(player.c), player.c); }
   settings.vsRule = 'TIME'; settings.stageSel = 'TOUR'; settings.vsCpu = 'AUTO'; invaders = [];
 }
 

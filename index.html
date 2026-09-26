@@ -836,7 +836,7 @@ function saveHi() {
 
 /* ---------------- キャンバス ---------------- */
 const cv = document.getElementById('game');
-const ctx = cv.getContext('2d');
+let ctx = cv.getContext('2d');                        // buddy を別の画用紙に描くときだけ、一時的に差しかえる
 
 /* ---------------- 言語(日本語 / English) ----------------
    画面の文字はすべて ctx.fillText を通るので、英語のときはそこで和英辞書 I18N_EN に置きかえる。
@@ -1450,7 +1450,8 @@ const I18N_EN = {
   "%以上を": "%+ of the board for ",
   "秒保つと決着(いちばん広い人の勝ち)": "s to finish (most turf wins)",
   "%を": "% for ",
-  "届くと総攻撃。buddy がかじるので、なかなか決着しない": "Reaching it triggers an all-out attack. Hard to finish"
+  "届くと総攻撃。buddy がかじるので、なかなか決着しない": "Reaching it triggers an all-out attack. Hard to finish",
+  "食い破る!": "breaks free!"
 };
 const I18N_RULES = [
   [/ラスト(\d+)秒!/g, 'Last $1 seconds!'],
@@ -3629,14 +3630,14 @@ function claimFill(palNo) {
 function snapPlayerToBoundary() {
   if (isBoundary(player.c)) return;
   const nb = surf.nb, visited = new Uint8Array(surf.N);
-  const q = [player.c];
+  const q = [player.c], free = grid[player.c] !== WALL;   // 足もとが空き地(描き始めの場所を buddy にかじられた等)なら、空き地も渡って探す
   visited[player.c] = 1;
   for (let h = 0; h < q.length; h++) {
     const c = q[h];
     if (isBoundary(c)) { player.c = c; player.prev = -1; return; }
     for (let k = 0; k < 4; k++) {
       const j = nb[c * 4 + k];
-      if (j >= 0 && !visited[j] && grid[j] === WALL) { visited[j] = 1; q.push(j); }
+      if (j >= 0 && !visited[j] && (grid[j] === WALL || free)) { visited[j] = 1; q.push(j); }
     }
   }
 }
@@ -7128,16 +7129,18 @@ function drawHpBars() {
    - buddy は空き地を歩く。陣地(壁)にぶつかると、そのマスをかじって空き地に戻してから進む(claimed を減らす)
    - ねらうのは陣地の広い人ほど多い(広さの2乗)。その人のタワーがあればタワーへ、なければ陣地の奥へ
    - タワーの足もとはかじれない(かわりにタワーを攻撃する)。描きかけの線を踏むと線が切れて、描いていた人はやられる
-   - 種類ごとに強さと特技がちがう(INV_TYPES)。レア度の高い種ほど後のウェーブから。5回に1回はドラゴンのボス
+   - 各種1体ずつ(同じ種は同時に1体まで)。種類ごとに強さと特技がちがう(INV_TYPES)。レア度の高い種ほど後のウェーブから。5回に1回はドラゴンのボス
    - タワーは設定に関係なく buddy をねらう。buddy のいる空き地を囲むか、タワーのインクで塗ると退治できる
    ===================================================================== */
-const WAVE_FIRST = 10, WAVE_EVERY = 15, WAVE_WARN = 3, INV_CHEW = 0.3, INV_MAX = 70;
-// ウェーブの大きさと間隔は、盤面の埋まり具合で変わる(埋まるほど大軍・早く)。なかなか80%に届かない釣り合い
-let rushWave = false;                               // 無制限で80%に届いたときの総攻撃
-function waveSize() { return Math.max(0, Math.min(INV_MAX - invaders.length, Math.round(6 + waveN * 2 + percent() * 0.4 + (rushWave ? 25 : 0)))); }
+const WAVE_FIRST = 10, WAVE_EVERY = 12, WAVE_WARN = 3, INV_CHEW = 0.18;
+// buddy は各種1体ずつ(盤面に同じ種は2体いない)。倒された種は、あとのウェーブでまた来る(そのぶん強くなって)
+// ウェーブの人数と間隔は、盤面の埋まり具合で変わる(埋まるほど多く・早く)。なかなか80%に届かない釣り合い
+let rushWave = false;                               // 無制限で80%に届いたときの総攻撃(来られる種が全員来る)
+function invFree() { return Object.keys(INV_TYPES).filter(k => INV_TYPES[k].rar <= waveN + 1 && !invaders.some(v => v.k === k)); }
+function waveSize() { return Math.max(0, Math.min(invFree().length, rushWave ? 18 : Math.round(5 + waveN * 1.5 + percent() / 10))); }
 function waveGap() { return percent() > 75 ? 6 : percent() > 60 ? 10 : WAVE_EVERY; }
 // 侵略者としての buddy。name: 表示名 / rar: 何回目のウェーブから / hp・spd: 倍率 / bite: ひと口(0=1マス 1=十字 2=大きく)
-// armor: 受けるダメージの倍率 / 特技: hop 跳ぶ・slide すべる・split 分裂・hunter タワー狩り・nap 昼寝・heal 仲間回復・regen 自分回復・
+// armor: 受けるダメージの倍率 / 特技: hop 跳ぶ・slide すべる・split 一度だけ復活・hunter タワー狩り・nap 昼寝・heal 仲間回復・regen 自分回復・
 // rot 腐らせる・ink 墨・fly 飛ぶ・phase すり抜け・shield バリア・thorns とげ・fire 火の玉・big 大きい
 const INV_TYPES = {
   duck:     { name:'アヒル',           rar:1, hp:1.0, spd:1.0, bite:0 },
@@ -7162,15 +7165,18 @@ const INV_TYPES = {
 let invaders = [], waveT = WAVE_FIRST, waveN = 0, waveSpawns = null, invShots = [];
 function invaderNear(c, d) { return invaders.some(v => cellDist(v.c, c) < d * towerScale()); }
 function invasionOn() { return isVS() && settings.invasion !== 'OFF'; }
-function invSpeed() { return 4.5 * towerScale(); }                // マス/秒(種類の倍率をかける)
-function invHpBase() { return 5 + waveN * 2; }
+function invSpeed() { return 5.2 * towerScale(); }                // マス/秒(種類の倍率をかける)
+function invHpBase() { return 30 + waveN * 10; }             // 1体ずつなので、群れだったころの4倍ほどの体力
 function invDef(v) { return INV_TYPES[v.k] || INV_TYPES.duck; }
-// ウェーブの顔ぶれ: そのウェーブまでに出られる種から。5回に1回はドラゴン、3回に1回はデブネコが先頭
+// ウェーブの顔ぶれ: そのウェーブまでに出られる種のうち、いま盤面にいない種から1体ずつ(重なりなし)
+// 5回に1回はドラゴン、3回に1回はデブネコが先頭(もういるときは来ない)
 function waveKinds(n) {
-  const pool = Object.keys(INV_TYPES).filter(k => INV_TYPES[k].rar <= waveN + 1), out = [];
-  for (let i = 0; i < n; i++) out.push(pick(pool));
-  if ((waveN + 1) % 5 === 0) out[0] = 'dragon';
-  else if ((waveN + 1) % 3 === 0 && INV_TYPES.chonk.rar <= waveN + 1) out[0] = 'chonk';
+  const pool = invFree().filter(k => k !== 'dragon'), out = [];
+  for (let i = pool.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [pool[i], pool[j]] = [pool[j], pool[i]]; }
+  const boss = (waveN + 1) % 5 === 0 && !invaders.some(v => v.k === 'dragon') ? 'dragon'
+    : (waveN + 1) % 3 === 0 && pool.includes('chonk') ? 'chonk' : null;
+  if (boss) out.push(boss);
+  for (const k of pool) { if (out.length >= n) break; if (k !== boss) out.push(k); }
   return out;
 }
 // 出てくる場所: 空き地のうち、ファイターから離れた、なるべくふち寄りのマス
@@ -7185,9 +7191,13 @@ function pickSpawns(n) {
   }
   if (!cand.length) for (let i = 0; i < surf.N; i += 2) if (grid[i] === OPEN && !nearQix(i, 4)) cand.push(i);   // ふちに空き地がなければどこでも
   if (!cand.length) return [];
-  const g = Math.min(3, 1 + (waveN >> 1)), heads = [];                 // 2〜3か所からまとまって出る
-  for (let k = 0; k < g; k++) heads.push(pick(cand));
-  return Array.from({ length: n }, (_, i) => heads[i % heads.length]);
+  const out = [];                                    // 1体ずつ、なるべく離れた場所から出る
+  for (let i = 0; i < n; i++) {
+    let best = pick(cand), bd = -1;
+    for (let t = 0; t < 24; t++) { const c = pick(cand), d = out.length ? Math.min(...out.map(o => cellDist(o, c))) : 0; if (d > bd) { bd = d; best = c; } }
+    out.push(best);
+  }
+  return out;
 }
 function makeInvader(k, c, hpK) {
   const d = INV_TYPES[k], hp = invHpBase() * d.hp * (hpK || 1);
@@ -7199,20 +7209,22 @@ function updateInvaders(dt) {
   // ウェーブの時計
   waveT -= dt;
   if (waveT <= WAVE_WARN && !waveSpawns) {
-    waveSpawns = pickSpawns(waveSize());
+    waveSpawns = pickSpawns(Math.max(1, waveSize()) + ((waveN + 1) % 5 === 0 ? 1 : 0));
     if (waveSpawns.length) Snd.fuseCr();
   }
   if (waveT <= 0) {
     const kinds = waveKinds((waveSpawns || []).length);
     waveN++;
-    (waveSpawns || []).forEach((c, i) => { if (grid[c] === OPEN || INV_TYPES[kinds[i]].fly) invaders.push(makeInvader(kinds[i], c)); });
+    let came = 0;
+    (waveSpawns || []).forEach((c, i) => { if (kinds[i] && (grid[c] === OPEN || INV_TYPES[kinds[i]].fly)) { invaders.push(makeInvader(kinds[i], c)); came++; } });
     const boss = kinds[0] === 'dragon' ? 'ドラゴン' : kinds[0] === 'chonk' ? 'デブネコ' : null;
-    if (rushWave) { rushWave = false; fxBanner = { txt: '総攻撃!', sub: 'buddy ×' + (waveSpawns || []).length, col: '#ff4a4a', t: 1.8, T: 1.8, big: true }; }
-    else fxBanner = { txt: '侵略ウェーブ ' + waveN + '!', sub: (boss ? boss + ' 襲来!  ' : '') + 'buddy ×' + (waveSpawns || []).length, col: boss ? '#ff6a3d' : '#9b5cff', t: 1.8, T: 1.8, big: !!boss };
+    if (rushWave) { rushWave = false; fxBanner = { txt: '総攻撃!', sub: 'buddy ×' + came, col: '#ff4a4a', t: 1.8, T: 1.8, big: true }; }
+    else fxBanner = { txt: '侵略ウェーブ ' + waveN + '!', sub: (boss ? boss + ' 襲来!  ' : '') + 'buddy ×' + came, col: boss ? '#ff6a3d' : '#9b5cff', t: 1.8, T: 1.8, big: !!boss };
     Snd.big();
     waveSpawns = null; waveT = waveGap();
   }
-  // 動く・かじる・特技
+  // 動く・かじる・特技。制圧中(80% を守っているあいだ)は怒って速くなる
+  const rage = endHold > 0 ? 1.8 : 1;
   for (const v of invaders.slice()) {
     const d = invDef(v);
     v.ph += dt * 6;
@@ -7224,13 +7236,13 @@ function updateInvaders(dt) {
     v.abT -= dt;
     if (v.abT <= 0) { v.abT = invAbility(v, d); }
     if (v.chew > 0) {                                  // かじっている最中
-      v.chew -= dt;
+      v.chew -= dt * rage;
       if (v.chew <= 0) chewCell(v, v.chewC);
       continue;
     }
     v.retarget -= dt;
     if (v.retarget <= 0 || !invTargetOk(v)) { invPickTarget(v); v.retarget = 3; }
-    v.acc += dt * invSpeed() * d.spd * (d.hop && Math.random() < dt * 1.5 ? 3 : 1);
+    v.acc += dt * rage * invSpeed() * d.spd * (d.hop && Math.random() < dt * 1.5 ? 3 : 1);
     while (v.acc >= 1 && v.chew <= 0) {
       v.acc -= 1;
       const n = invNext(v);
@@ -7285,7 +7297,7 @@ function invPickTarget(v) {
   for (const o of own) { x -= o.area * o.area; if (x <= 0) { who = o; break; } }
   const ts = towers.filter(t => t.own === who.own), tsAll = towers;
   if (d.hunter && tsAll.length) { const t = tsAll.slice().sort((a, b) => cellDist(a.c, v.c) - cellDist(b.c, v.c))[0]; v.tgt = { own: t.own, c: t.c }; return; }
-  if (ts.length && Math.random() < 0.6) { v.tgt = { own: who.own, c: pick(ts).c }; return; }
+  if (ts.length && Math.random() < 0.35) { v.tgt = { own: who.own, c: pick(ts).c }; return; }
   let best = -1, bd = 1e9;
   for (let k = 0; k < 120; k++) { const c = (Math.random() * surf.N) | 0; if (grid[c] === WALL && ownA[c] === who.own && !baseA[c]) { const dd = cellDist(v.c, c); if (dd < bd) { bd = dd; best = c; } } }
   v.tgt = best >= 0 ? { own: who.own, c: best } : null;
@@ -7321,8 +7333,12 @@ let chewDirty = false;
 function chewCell(v, n) {
   if (state !== 'play' || !chewable(n)) return;
   const d = invDef(v), bite = [n];
-  if (d.bite >= 1 || waveN >= 4) for (let k = 0; k < 4; k++) { const b = surf.nb[n * 4 + k]; if (chewable(b)) bite.push(b); }
-  if (d.bite >= 2) for (const b of bite.slice(1)) for (let k = 0; k < 4; k++) { const e = surf.nb[b * 4 + k]; if (chewable(e) && !bite.includes(e)) bite.push(e); }
+  const bt = d.bite + 2;          // 1体ずつなので、ひと口は群れだったころより1段大きい
+  for (let r = 0, edge = [n]; r < Math.min(3, bt); r++) {
+    const nx = [];
+    for (const b of edge) for (let k = 0; k < 4; k++) { const e = surf.nb[b * 4 + k]; if (chewable(e) && !bite.includes(e)) { bite.push(e); nx.push(e); } }
+    edge = nx;
+  }
   for (const c of bite) chewAt(c);
   v.prev = v.c; v.c = n;
   afterChew();
@@ -7341,14 +7357,23 @@ function towerHpMax(T) { return 8 + T.lv * 4; }
 function invHitTower(v, T) {
   const d = invDef(v);
   if (T.hp == null) T.hp = towerHpMax(T);
-  T.hp -= (d.hunter ? 2 : 1) * (d.big ? 2 : 1); v.chew = INV_CHEW * 1.5; v.chewC = -1; T.hurtT = blinkT;
+  T.hp -= (d.hunter ? 3 : 2) * (d.big ? 2 : 1); v.chew = INV_CHEW * 1.5; v.chewC = -1; T.hurtT = blinkT;
   const p = towerScreen(T);
   if (towerVisible(T)) spawnParticles(p.x, p.y, 4, '#b98cff');
   if (T.hp <= 0) removeTower(T, true);
 }
 // buddy がいる空き地が陣地になった(囲まれた・塗られた)ら退治。by = 手柄の持ち主(own)。飛ぶ・すり抜ける種は除く
+// 1体ずつ強いので、囲まれても即退治ではなく体力の6割を失う。生き残ると陣地の中から食い破って出てくる(2秒に1回まで)
 function crushInvaders(by) {
-  for (const v of invaders.slice()) { const d = invDef(v); if (grid[v.c] === WALL && v.chew <= 0 && !d.fly && !d.phase) killInvader(v, by); }
+  for (const v of invaders.slice()) {
+    const d = invDef(v);
+    if (grid[v.c] !== WALL || v.chew > 0 || d.fly || d.phase || blinkT - (v.crushT || -99) < 2) continue;
+    v.crushT = blinkT; v.shield = 0;
+    v.hp -= v.hpMax * 0.6 * (d.armor || 1);
+    const p = surf.screenOf(v.c);
+    if (v.hp <= 0) killInvader(v, by);
+    else if (!surf.is3D || visA[v.c]) { spawnParticles(p.x, p.y, 8, '#b98cff'); floats.push({ x: p.x, y: p.y - 20, txt: d.name + ' 食い破る!', t: 1.2, col: '#e2c8ff' }); }
+  }
 }
 // 撃たれた: バリア → 甲羅・昼寝で減る → 体力
 function hurtInvader(v, dmg, by) {
@@ -7360,10 +7385,14 @@ function hurtInvader(v, dmg, by) {
 function killInvader(v, by) {
   const i = invaders.indexOf(v);
   if (i < 0) return;
-  invaders.splice(i, 1);
   const d = invDef(v), p = surf.screenOf(v.c);
+  if (d.split && !v.revived && grid[v.c] !== WALL) {    // ブロブ: 一度だけ、半分の体力でぷるんと立ち直る
+    v.revived = true; v.hp = v.hpMax * 0.5;
+    if (!surf.is3D || visA[v.c]) { spawnParticles(p.x, p.y, 10, '#8fe6a0'); rings.push({ x: p.x, y: p.y, t: 0.4, col: '#8fe6a0', R: 200 }); }
+    return;
+  }
+  invaders.splice(i, 1);
   if (!surf.is3D || visA[v.c]) { spawnParticles(p.x, p.y, d.big ? 40 : 16, '#b98cff'); rings.push({ x: p.x, y: p.y, t: 0.4, col: '#9b5cff', R: d.big ? 300 : 460 }); }
-  if (d.split && !v.small) for (let k = 0; k < 2; k++) { const u = makeInvader('blob', v.c, 0.4); u.small = true; invaders.push(u); }   // ブロブは分裂
   if (by === 1) { score += d.big ? 3000 : 300; vsStat.repel = (vsStat.repel || 0) + 1; if (vsStat.repel >= 10) unlock('repel'); if (v.k === 'dragon') floats.push({ x: p.x, y: p.y - 30, txt: 'ドラゴン撃退! +3000', t: 2, col: '#ffd76b', big: true }); }
   Snd.splat(d.big ? 0.3 : 0.08);
 }
@@ -7387,23 +7416,83 @@ function drawInvaders() {
     if (sh.kind === 'fire') glowDot(x, y, 12, '#ff8a2a', 0.6);
   }
 }
-// 侵略してくる buddy: 足もとに紫のもや、怒り眉。いつもの buddy の絵で
+// 侵略してくる buddy: 別の画用紙に大きく描いて、光と影(立体感)・太い黒ふち・歩くときの伸び縮み・足もとの影・怒り眉・名札
+const BUD_BOX = 128, BUD_S = 2.0, BUD_CX = 64, BUD_CY = 74;   // 画用紙の大きさ・描く倍率・buddy の中心
+// 絵は種類ごとに一度だけ焼いて使い回す(重くならないように)。羽ばたく・足の動く種だけ BUD_FR コマ
+const BUD_FR = 12, BUD_ANIM = { dragon: Math.PI / 2, octopus: Math.PI / 2 };   // 動きの周期(ph)
+const budCache = new Map();
+function budMk() {
+  const c = (typeof document !== 'undefined' && document.createElement) ? document.createElement('canvas') : null;
+  if (c) { c.width = BUD_BOX; c.height = BUD_BOX; }
+  return c;
+}
+// 陰影(光と影)・黒いふちどりまで焼いた buddy の絵。できなければ null
+function bakeBuddy(k, ph, warn) {
+  const per = BUD_ANIM[k], fr = per ? Math.floor(((ph % per) + per) % per / per * BUD_FR) : 0;
+  const key = k + ':' + fr + (warn ? 'w' : '');
+  if (budCache.has(key)) return budCache.get(key);
+  const c = budMk(), g = c && c.getContext && c.getContext('2d'), o = budMk(), og = o && o.getContext && o.getContext('2d');
+  if (!g || !g.save || !og) { budCache.set(key, null); return null; }
+  const main = ctx; ctx = g;
+  const bph = per ? fr / BUD_FR * per : k === 'ghost' ? Math.PI / 1.6 : 0;   // ユーレイはいちばん濃いときで焼く(透け具合は描くときに)
+  try { drawBuddy(k, BUD_CX, BUD_CY, BUD_S, { ph: bph, warn }); } finally { ctx = main; }
+  const R = 9 * BUD_S, x = BUD_CX, y = BUD_CY;
+  g.globalCompositeOperation = 'source-atop';              // 絵の上だけに陰影を重ねる
+  const lt = g.createRadialGradient(x - R * 0.45, y - R * 0.6, R * 0.1, x - R * 0.3, y - R * 0.4, R * 1.3);
+  lt.addColorStop(0, 'rgba(255,255,255,0.42)'); lt.addColorStop(0.45, 'rgba(255,255,255,0.08)'); lt.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = lt; g.fillRect(0, 0, BUD_BOX, BUD_BOX);
+  const dk = g.createLinearGradient(0, y - R * 0.5, 0, y + R * 1.3);
+  dk.addColorStop(0, 'rgba(30,0,50,0)'); dk.addColorStop(1, 'rgba(30,0,50,0.5)');
+  g.fillStyle = dk; g.fillRect(0, 0, BUD_BOX, BUD_BOX);
+  const rim = g.createRadialGradient(x + R * 0.9, y + R * 0.2, 0, x + R * 0.9, y + R * 0.2, R * 0.9);   // 右うしろから紫の照り返し
+  rim.addColorStop(0, 'rgba(190,120,255,0.35)'); rim.addColorStop(1, 'rgba(190,120,255,0)');
+  g.fillStyle = rim; g.fillRect(0, 0, BUD_BOX, BUD_BOX);
+  g.globalCompositeOperation = 'source-over';
+  // 黒いふちどり: 絵を8方向にずらして黒く塗り、その上に絵を重ねる
+  const w = 2.2;
+  for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]]) og.drawImage(c, ox * w, oy * w);
+  og.globalCompositeOperation = 'source-in'; og.fillStyle = '#12081a'; og.fillRect(0, 0, BUD_BOX, BUD_BOX);
+  og.globalCompositeOperation = 'source-over'; og.drawImage(c, 0, 0);
+  budCache.set(key, o);
+  return o;
+}
 function drawInvader(x, y, s, v) {
-  const d = invDef(v), k = s * (d.big || 1) * 1.15, bob = d.fly ? -8 * s + Math.sin(v.ph) * 2 : 0;
+  const d = invDef(v), k = s * (d.big || 1) * 1.35, bob = d.fly ? -8 * s + Math.sin(v.ph) * 2 : 0;
+  const walk = v.chew > 0 ? Math.sin(v.ph * 2.2) * 0.07 : v.nap > 0 ? Math.sin(v.ph * 0.4) * 0.03 : Math.sin(v.ph * 1.6) * 0.05;   // 伸び縮み(かじるときは大きく)
   ctx.save();
   if (d.phase && v.fade) ctx.globalAlpha = 0.3;
-  ctx.fillStyle = 'rgba(40,0,60,0.45)'; ctx.beginPath(); ctx.ellipse(x, y + 6 * k, 11 * k, 4.5 * k, 0, 0, Math.PI * 2); ctx.fill();   // 足もとのもや
+  // 足もとの影と、紫のもや(ゆっくり息づく。点滅なし)
+  const sh = d.fly ? 0.6 : 1;
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.beginPath(); ctx.ellipse(x + 2 * k, y + 6 * k, 11 * k * sh, 4 * k * sh, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(120,40,200,' + (0.18 + 0.06 * Math.sin(v.ph * 0.5)).toFixed(3) + ')'; ctx.beginPath(); ctx.ellipse(x, y + 6 * k, 15 * k, 6 * k, 0, 0, Math.PI * 2); ctx.fill();
   if (v.nap > 0) { ctx.fillStyle = '#ffffff'; ctx.font = "bold " + Math.round(10 * s) + "px 'Courier New', monospace"; ctx.textAlign = 'left'; ctx.fillText('z', x + 9 * k, y - 12 * k); }
-  drawBuddy(v.k, x, y - 3 * k + bob, k, { ph: v.ph, warn: d.fire && v.abT < 0.8 });
+  const cy = y - 3 * k + bob, B = bakeBuddy(v.k, v.ph, d.fire && v.abT < 0.8);
+  if (B) {
+    const q = k / BUD_S, sx = (1 + walk) * (v.look < 0 ? -1 : 1), sy = 1 - walk, foot = cy + 9 * k, hop = Math.sin(v.ph * 3) * k;
+    ctx.save(); ctx.translate(x, foot); ctx.scale(sx, sy); ctx.translate(-x, -foot);
+    if (v.k === 'ghost') ctx.globalAlpha *= (0.55 + 0.25 * Math.sin(v.ph * 0.8)) / 0.8;
+    const w = BUD_BOX * q;
+    ctx.drawImage(B, x - BUD_CX * q, cy + hop - BUD_CY * q, w, w);
+    ctx.restore();
+  } else drawBuddy(v.k, x, cy, k, { ph: v.ph, warn: d.fire && v.abT < 0.8 });
   // 怒り眉(侵略者だとわかるように)
-  ctx.strokeStyle = '#1b1420'; ctx.lineWidth = Math.max(1.2, 1.5 * k);
-  ctx.beginPath(); ctx.moveTo(x - 5 * k, y - 9 * k + bob); ctx.lineTo(x - 1.5 * k, y - 7 * k + bob); ctx.moveTo(x + 5 * k, y - 9 * k + bob); ctx.lineTo(x + 1.5 * k, y - 7 * k + bob); ctx.stroke();
-  if (v.shield > 0) { ctx.strokeStyle = 'rgba(94,224,255,0.8)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y - 3 * k + bob, 13 * k, 0, Math.PI * 2); ctx.stroke(); }
+  ctx.strokeStyle = endHold > 0 ? '#e0203a' : '#1b1420'; ctx.lineWidth = Math.max(1.4, 1.7 * k); ctx.lineCap = 'round';   // 制圧中は怒って赤い眉
+  const ex = v.look < 0 ? -1 : 1;
+  ctx.beginPath(); ctx.moveTo(x - 5 * k * ex, y - 9 * k + bob); ctx.lineTo(x - 1.5 * k * ex, y - 7 * k + bob); ctx.moveTo(x + 5 * k * ex, y - 9 * k + bob); ctx.lineTo(x + 1.5 * k * ex, y - 7 * k + bob); ctx.stroke();
+  if (v.shield > 0) {                                 // バリア: 残りの枚数だけ輪
+    for (let i = 0; i < v.shield; i++) { ctx.strokeStyle = 'rgba(94,224,255,' + (0.8 - i * 0.2) + ')'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, cy, (13 + i * 3) * k, 0, Math.PI * 2); ctx.stroke(); }
+  }
   ctx.restore();
-  if (v.hp < v.hpMax) {                               // 体力
-    const w = 22 * k;
-    ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(x - w / 2 - 1, y - 20 * k + bob - 1, w + 2, 4);
-    ctx.fillStyle = d.big ? '#ff6a3d' : '#c38bff'; ctx.fillRect(x - w / 2, y - 20 * k + bob, w * Math.max(0, v.hp) / v.hpMax, 2);
+  // 名札と体力
+  const w = 24 * k, ty = y - 21 * k + bob;
+  if (v.hp < v.hpMax) {
+    ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(x - w / 2 - 1, ty - 1, w + 2, 4);
+    ctx.fillStyle = d.big ? '#ff6a3d' : '#c38bff'; ctx.fillRect(x - w / 2, ty, w * Math.max(0, v.hp) / v.hpMax, 2);
+  }
+  if (!(d.phase && v.fade)) {
+    ctx.font = "bold " + Math.round(Math.max(8, 8 * s)) + "px 'Courier New', monospace"; ctx.textAlign = 'center';
+    ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(10,4,20,0.85)'; ctx.fillStyle = d.big ? '#ffb48a' : '#e2c8ff';
+    ctx.strokeText(d.name, x, y + 16 * k); ctx.fillText(d.name, x, y + 16 * k);
   }
 }
 // ウェーブの前ぶれ: 出てくる場所にゆっくり広がる輪(点滅なし)

@@ -25,9 +25,11 @@ NAWABARI(ナワバリバトル、`C:\Users\sisho\Desktop\nawabari`、タグ v1-b
 - 描画: `drawTowers` → `drawTower` → `drawTowerArt`(斜め上から見た立体風。台座+本体 `towerBaseSprite`・砲台 `towerTurretSprite` は種類・チームごとに一度だけ描いて `towerSprites` にしまう)/ `drawShots` / `drawHpBars`
 - 自動で塗る: 近くに敵がいないと `towerPaint`(射程内の自分の陣地のとなりの空き地・中立へインクの弾 'ink')→ `paintSplat`(claimed を増やす・ふちを線に)
 - 乗っ取り: 敵のタワーの足もと(`TOWER_CORE` マス)は上塗りで塗りかえられず `towerCoreGuard` が制御ゲージ `T.hold` を減らす。0 で `hijackTower`
-- 侵略ウェーブ(`settings.invasion`): buddy 18種(`INV_TYPES`: 強さの倍率と特技。絵は `drawBuddy`、怒り眉つき `drawInvader`)の群れ `invaders`。
+- 侵略ウェーブ(`settings.invasion`): buddy 18種(`INV_TYPES`: 強さの倍率と特技)が各種1体ずつ `invaders`(同じ種は同時に1体まで。`invFree`/`waveKinds`)。1体ずつなので体力・ひと口が大きい。
+  絵は `drawBuddy` を `bakeBuddy` で別の画用紙に焼き(陰影・黒ふち、種類ごとにキャッシュ `budCache`)、`drawInvader` で伸び縮み・影・怒り眉・名札。焼くときは `ctx` を一時的に差しかえる(`let ctx`)。
+  囲まれても即退治ではなく体力の6割を失い、生き残ると中から食い破る(`crushInvaders`)。ブロブは一度だけ復活。制圧中(`endHold`)は怒って速い。
   `updateInvaders` → `invNext` → 陣地は `chewCell`/`chewAt` でかじる(claimed を減らす、`afterChew` で片付け)。特技は `invAbility`(キノコ・タコ・ドラゴン)ほか。
-  ウェーブの大きさ `waveSize`・間隔 `waveGap` は盤面の埋まり具合で変わる(埋まるほど大軍・早く、同時に `INV_MAX` 体まで)。ねらいは広さの2乗(`invPickTarget`)
+  ウェーブの大きさ `waveSize`・間隔 `waveGap` は盤面の埋まり具合で変わる(埋まるほど多く・早く、最大18種)。ねらいは広さの2乗(`invPickTarget`)
 - ルール「無制限」(`isEndless`、最初の設定): 時間切れなし。盤面の `ENDLESS_TARGET`% 以上を `ENDLESS_HOLD` 秒保つと決着(`endHold`)。届くと総攻撃(`rushWave`)
 - 試合の流れの確認は scratchpad の sim.js のような早回し(何秒で何%・buddy の数・タワーの数)。オーナーの希望は「なかなか80%まで塗れない」
 - 改行は CRLF。このフォルダは `core.autocrlf=false`(元の nawabari と同じ)。sed -i で書くと LF になるので注意
