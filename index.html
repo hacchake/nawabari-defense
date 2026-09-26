@@ -745,7 +745,7 @@ const store = (() => {
 
 const settings = Object.assign(
   { bgm: 6, sfx: 7, diff: 'NORMAL', lives: CONFIG.LIVES, theme: THEMES.length, crt: true, mode: 'VS', music: 'AUTO', shake: true, glow: true, ink: 'MIX', claimSnd: 'MIX',
-    vsCpu: 'AUTO', cpuLv: 'AUTO', matchTime: 90, stageSel: 'TOUR', vsRule: 'TIME', vsStock: 3, stageSize: 'AUTO', numerin: 'ON', bachikko: 'ON', fillRule: 'SMALL', towerTarget: 'FIGHTERS',
+    vsCpu: 'AUTO', cpuLv: 'AUTO', matchTime: 90, stageSel: 'TOUR', vsRule: 'TIME', vsStock: 3, stageSize: 'AUTO', numerin: 'ON', bachikko: 'ON', fillRule: 'SMALL', towerTarget: 'FIGHTERS', invasion: 'ON',
     lang: (typeof navigator !== 'undefined' && navigator.language && !/^ja/i.test(navigator.language)) ? 'EN' : 'JA' },
   store.get('qlaim.settings', {})
 );
@@ -796,6 +796,7 @@ const ACHV = [
   { id:'all',      name:'全ステージ制覇', txt:'すべてのステージで勝つ' },
   { id:'nearmiss', name:'ギリギリの達人', txt:'1ゲームでニアミスを5回' },
   { id:'hijack',   name:'乗っ取り',       txt:'上塗りで相手のタワーを乗っ取る' },
+  { id:'repel',    name:'防衛成功',       txt:'1試合でインクイを10体たおす' },
 ];
 const achvGot = store.get('qlaim.ach', {});
 const wagaraGot = store.get('qlaim.wagara', {});     // 自分で出した和柄の種類
@@ -1395,7 +1396,19 @@ const I18N_EN = {
   "乗っ取り": "Hijacker",
   "上塗りで相手のタワーを乗っ取る": "Capture a rival's tower with Overpaint",
   "陣地を取るとタワーが建ち、相手を撃つ。いないときは少しずつ塗り広げる": "Claims build towers that shoot rivals, and slowly paint turf when idle",
-  "上塗りで相手のタワーの足もとを走り続けると、乗っ取れる": "Keep overpainting around a rival's tower to capture it"
+  "上塗りで相手のタワーの足もとを走り続けると、乗っ取れる": "Keep overpainting around a rival's tower to capture it",
+  "侵略ウェーブ ": "Invasion wave ",
+  "侵略ウェーブ": "Invasion waves",
+  "インクイ ×": "Inkui ×",
+  "インクイ": "Inkui",
+  " まで ": " in ",
+  "インクイに線を踏まれた": "An Inkui stepped on your line",
+  "侵略者は来ない": "No invaders",
+  "秒後から": "s in, every ",
+  "秒ごとに、陣地をかじるインクイの群れが来る": "s a swarm of turf-eating Inkui arrives",
+  "防衛成功": "Defender",
+  "1試合でインクイを10体たおす": "Defeat 10 Inkui in one match",
+  "侵略者インクイは陣地をかじる。タワーで撃つか、空き地ごと囲んで退治": "Inkui invaders eat turf. Shoot them with towers or enclose them"
 };
 const I18N_RULES = [
   [/ラスト(\d+)秒!/g, 'Last $1 seconds!'],
@@ -3379,6 +3392,7 @@ function initLevel(lv) {
   recountAreas();
 
   towers = []; shots = []; player.hp = FIGHTER_HP; player.hurtT = 9;
+  invaders = []; waveT = WAVE_FIRST; waveN = 0; waveSpawns = null;
   particles = []; floats = []; fxBanner = null; zoomPunch = null; fwQueue = []; slowMoT = 0;
   if (isVS()) lapseReset();                         // タイムラプスの最初の盤面
   deathTimer = 0; wasSplit = false; shakeT = 0;
@@ -3815,6 +3829,7 @@ function closeTrail() {
 
   const gained = claimFill(palNo) + trail.length;
   claimed += gained;
+  if (invaders.length) crushInvaders(1);
   if (hasRivals()) { trapRivals(); recountAreas(); rescueQixes(); }
   // 模様: 塗ったときの状況(時間・面積・アイテム・コンボ)で決まる
   const pat = pickPattern({ drawTime: blinkT - (player.drawT || blinkT), pct: gained / initOpen * 100 });
@@ -4307,7 +4322,7 @@ function updateRival3D(r, dt) {
   const spdOf = fast => (r.drawing ? (fast ? CONFIG.DRAW_FAST : CONFIG.DRAW_SLOW) : CONFIG.PLAYER_SPEED) * surf.def.speed;
   const q = qixes[0];
   if (r.drawing) r.drawT = (r.drawT || 0) + dt; else r.drawT = 0;
-  if (r.drawing && r.mode !== 'flee' && ((q && qixNear3(r.c, surf.def.arm + 3)) || r.drawT > 14 || r.hp <= 2)) rivalGoHome3D(r);
+  if (r.drawing && r.mode !== 'flee' && ((q && qixNear3(r.c, surf.def.arm + 3)) || r.drawT > 14 || r.hp <= 2 || invaderNear(r.c, 4))) rivalGoHome3D(r);
   if (!r.plan.length) {
     if (r.drawing) { rivalGoHome3D(r); if (!r.plan.length) { rivalFail(r, 'stuck'); return; } }
     else { r.think -= dt; if (r.think > 0) return; r.think = thinkTime(); planRival3D(r); if (!r.plan.length) return; }
@@ -4432,6 +4447,7 @@ const MATCH_ITEMS = [
   { k:'bachikko',  label:'バチッコ(火の玉)', vals:['ON', 'OFF'] },
   { k:'fillRule',  label:'塗れる側',       vals:['SMALL', 'QIX'] },
   { k:'towerTarget', label:'タワーが撃つ相手', vals:['FIGHTERS', 'ALL'] },
+  { k:'invasion',  label:'侵略ウェーブ',     vals:['ON', 'OFF'] },
   { k:'_keys',     label:'キーコンフィグ' },
   { k:'_back',     label:'もどる' },
 ];
@@ -4536,6 +4552,7 @@ const VSSET_ITEMS = [
   { k:'_enemy',   label:'じゃま役' },                // ヌメリン・バチッコの ON / OFF
   { k:'fillRule', label:'塗れる側' },                // ヌメリンがいるときだけ: 狭いほう / ヌメリンのいない側
   { k:'towerTarget', label:'タワーが撃つ' },         // ファイターだけ / ファイター+じゃま役
+  { k:'invasion', label:'侵略ウェーブ' },            // インクイの群れ ON / OFF
   { k:'_start',   label:'スタート' },
 ];
 let vsSel = VSSET_ITEMS.length - 1, vsRects = [];
@@ -4554,6 +4571,7 @@ function vsSetDo(i, dir) {
   else if (it.k === 'cpuLv') cyc('cpuLv', ['AUTO'].concat(CPU_LV));
   else if (it.k === 'fillRule') { if (settings.numerin === 'OFF') return; cyc('fillRule', ['SMALL', 'QIX']); }
   else if (it.k === 'towerTarget') cyc('towerTarget', ['FIGHTERS', 'ALL']);
+  else if (it.k === 'invasion') cyc('invasion', ['ON', 'OFF']);
   else if (it.k === '_enemy') { const e = ENEMY_SETS[(enemySetIdx() + dir + ENEMY_SETS.length) % ENEMY_SETS.length]; settings.numerin = e[0]; settings.bachikko = e[1]; }
   Snd.blip(); saveSettings();
 }
@@ -4565,7 +4583,7 @@ function drawVsSetup(t) {
   ctx.fillText('全員敵同士。いちばん広い陣地を取れ!', W / 2, 190);
   vsRects = [];
   VSSET_ITEMS.forEach((it, i) => {
-    const y = 226 + i * 49, sel = i === vsSel;
+    const y = 222 + i * 45, sel = i === vsSel;
     if (it.k === '_start') {
       vsRects.push({ x: W / 2 - 130, y: y - 30, w: 260, h: 52, i });
       ctx.fillStyle = sel ? '#ffd76b' : '#8a7a3a'; ctx.fillRect(W / 2 - 130, y - 30, 260, 52);
@@ -4573,15 +4591,16 @@ function drawVsSetup(t) {
       ctx.fillText('スタート', W / 2, y + 4);
       return;
     }
-    vsRects.push({ x: 80, y: y - 26, w: W - 160, h: 46, i });
-    ctx.fillStyle = sel ? 'rgba(60,80,160,0.9)' : 'rgba(20,26,56,0.85)'; ctx.fillRect(80, y - 26, W - 160, 46);
-    if (sel) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.strokeRect(81, y - 25, W - 162, 44); }
+    vsRects.push({ x: 80, y: y - 24, w: W - 160, h: 42, i });
+    ctx.fillStyle = sel ? 'rgba(60,80,160,0.9)' : 'rgba(20,26,56,0.85)'; ctx.fillRect(80, y - 24, W - 160, 42);
+    if (sel) { ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.strokeRect(81, y - 23, W - 162, 40); }
     let label = it.label, v = '', sub = '';
     if (it.k === 'stageSel') { v = stageLabel(settings.stageSel); sub = settings.stageSel === 'TOUR' ? '平面 → 立方体 → 球 … とラウンドごとに進む' : settings.stageSel === 'RANDOM' ? 'ラウンドごとにランダム' : (CONFIG.SURF[settings.stageSel] || {}).sub || ''; }
     else if (it.k === 'stageSize') { const k2 = settings.stageSize || 'AUTO'; v = stageSizeLabel(k2); sub = k2 === 'AUTO' ? '人数が多いほど広く(いまの人数なら ' + STAGE_SIZES[(() => { const n = vsCpuCount(1) + 1; return n <= 4 ? 'M' : n <= 7 ? 'L' : 'XL'; })()].label + ')' : 'CPUが多いときは広いほうがすっきり'; }
     else if (it.k === 'vsRule') { v = settings.vsRule === 'STOCK' ? '残機制' : '時間制'; sub = settings.vsRule === 'STOCK' ? '時間なし。残機がなくなると脱落。最後まで残れ!' : '時間切れのとき、いちばん広い人の勝ち'; }
     else if (it.k === '_amount') { if (settings.vsRule === 'STOCK') { label = '残機'; v = vsStock() + '機'; sub = 'CPUも同じ数'; } else { label = '試合時間'; v = matchTime() + '秒'; } }
     else if (it.k === 'vsCpu') { v = settings.vsCpu === 'AUTO' ? 'AUTO' : settings.vsCpu + '人'; sub = settings.vsCpu === 'AUTO' ? '3人から、2ラウンドごとに1人ずつ増える(7人まで)' : ''; }
+    else if (it.k === 'invasion') { v = settings.invasion === 'OFF' ? 'OFF' : 'ON'; sub = settings.invasion === 'OFF' ? '侵略者は来ない' : WAVE_FIRST + '秒後から' + WAVE_EVERY + '秒ごとに、陣地をかじるインクイの群れが来る'; }
     else if (it.k === 'towerTarget') { v = TARGET_LABEL[settings.towerTarget] || TARGET_LABEL.FIGHTERS; sub = settings.towerTarget === 'ALL' ? 'ヌメリンはしびれて止まり、バチッコは消える' : '相手のファイターだけを撃つ'; }
     else if (it.k === 'fillRule') {
       if (settings.numerin === 'OFF') { v = '狭いほう'; sub = 'ヌメリンがいないときは、いつも狭いほう'; }
@@ -4849,6 +4868,7 @@ function rivalClose(r) {
   // 囲んだアイテム: 上塗りはそのファイターのもの。ほかは消える
   for (const it of items.filter(it => grid[it.c] !== OPEN)) { items.splice(items.indexOf(it), 1); if (it.k === 'over') fighterOver(r, it); }
   claimed += gained; recountAreas();
+  if (invaders.length) crushInvaders(2 + r.id);
   rescueQixes();
   // 自機の描きかけの線が囲まれたら、自機がやられる
   if (player.drawing && trail.some(c => !visited[c])) death(r.name + 'に囲まれた');
@@ -5061,7 +5081,7 @@ function updateRivals(dt) {
     const q = qixes[0];
     if (r.drawing) r.drawT = (r.drawT || 0) + dt; else r.drawT = 0;
     const fleeR = 7 + surf.def.arm * 0.7 + Math.max(0, rivalSkill() - 1) * 6;   // 強いほど早めに逃げる
-    if (r.drawing && r.mode !== 'flee' && ((q && Math.hypot(r.fx - q.x, r.fy - q.y) < fleeR) || r.drawT > 14 || r.hp <= 2)) rivalGoHome(r);
+    if (r.drawing && r.mode !== 'flee' && ((q && Math.hypot(r.fx - q.x, r.fy - q.y) < fleeR) || r.drawT > 14 || r.hp <= 2 || invaderNear(r.c, 4))) rivalGoHome(r);
     if (!r.plan.length) {
       if (r.drawing) { rivalGoHome(r); if (!r.plan.length) { rivalFail(r, 'stuck'); continue; } }
       else { r.think -= dt; if (r.think > 0) continue; r.think = thinkTime(); planRival(r); if (!r.plan.length) continue; }
@@ -5300,6 +5320,14 @@ function drawVsHud(clock) {
   ctx.textAlign = 'center';
   const tm = Math.ceil(vsT);
   ctx.fillStyle = tm <= 10 ? '#ff8fa8' : '#ffd76b'; ctx.font = "bold 16px 'Courier New', monospace";
+  if (invasionOn() && !clock && state === 'play') {       // 次の侵略ウェーブまで
+    const wt = Math.ceil(waveT);
+    ctx.save(); ctx.textAlign = 'right'; ctx.font = "bold 12px 'Courier New', monospace";
+    ctx.fillStyle = wt <= WAVE_WARN ? '#c38bff' : '#8f86b8';
+    ctx.fillText('侵略ウェーブ ' + (waveN + 1) + ' まで ' + wt + '秒' + (invaders.length ? '  インクイ ×' + invaders.length : ''), x + w, y + 44);
+    ctx.restore();
+    ctx.fillStyle = tm <= 10 ? '#ff8fa8' : '#ffd76b'; ctx.font = "bold 16px 'Courier New', monospace";
+  }
   if (clock) ctx.fillStyle = '#9dffea';
   ctx.fillText(clock || (isStock() ? '残機制' : Math.floor(tm / 60) + ':' + String(tm % 60).padStart(2, '0')), W / 2, y - 8);   // 残り時間はバーの上(下は色ごとの割合)
 }
@@ -5773,6 +5801,7 @@ function drawHelp(t) {
    '時間切れ(残機制は最後まで残る)で、いちばん広い人の勝ち',
    '陣地を取るとタワーが建ち、相手を撃つ。いないときは少しずつ塗り広げる',
    '上塗りで相手のタワーの足もとを走り続けると、乗っ取れる',
+   '侵略者インクイは陣地をかじる。タワーで撃つか、空き地ごと囲んで退治',
    '勝つと次のラウンド(平面・立体・球・クラインの壺 …)',
    'X を押す間は立体の全体が見える。P ポーズ / M 消音 / C スクショ',
    'ヌメリン・バチッコは 準備画面の「じゃま役」で出さないこともできる'].forEach((ln, i) => ctx.fillText(ln, W / 2, y + i * 18));
@@ -6006,7 +6035,7 @@ function updateWorld(dt, stepped) {
   if (deathTimer > 0) { updateParticles(dt); updateFloats(dt); return; }
   if (deathTimer > 0) { updateParticles(dt); updateFloats(dt); return; }
   if (deathTimer > 0) { updateParticles(dt); updateFloats(dt); return; }
-  if (hasRivals()) { updateRivals(dt); updateTowers(dt); if (state !== 'play') return; updateVoices(); updateBanter(dt); if (state !== 'play') { Snd.voiceStopAll(); for (const r of rivals) r.voice = false; return; } if (deathTimer > 0) { updateParticles(dt); updateFloats(dt); return; } }
+  if (hasRivals()) { updateRivals(dt); updateTowers(dt); updateInvaders(dt); if (state !== 'play') return; updateVoices(); updateBanter(dt); if (state !== 'play') { Snd.voiceStopAll(); for (const r of rivals) r.voice = false; return; } if (deathTimer > 0) { updateParticles(dt); updateFloats(dt); return; } }
   if (fieldDirty) { fieldDirty = false; redrawField(); }
   updateItems(dt);
   areaTime += dt;
@@ -6370,6 +6399,7 @@ function render() {
   else render2D(t);
   drawItems();
   drawTowers();
+  drawInvaders(); drawWaveWarn();
   if (rivals.length && !surf.is3D) drawRivals(t);
   if (rivals.length && surf.is3D) drawRivals3D(t);
   if ((rivals.length || souls.length)) drawSouls(false);
@@ -6514,17 +6544,19 @@ function towerEnemies(T) {
   const out = [];
   if (T.team !== 0 && deathTimer <= 0 && !player.out && !(player.invuln > 0)) out.push({ type: 'p', ref: player });
   for (const r of rivals) if (r.team !== T.team && r.dead <= 0 && !r.out && !(r.inv > 0)) out.push({ type: 'r', ref: r });
+  for (const v of invaders) out.push({ type: 'i', ref: v });           // インクイはいつもねらう
   if (settings.towerTarget === 'ALL') {
     for (const q of qixes) if (!(q.stun > 0)) out.push({ type: 'q', ref: q });
     for (const sp of sparxes) out.push({ type: 's', ref: sp });
   }
   return out;
 }
-function tgCell(tg) { return tg.type === 'p' ? player.c : tg.type === 'r' ? tg.ref.c : tg.type === 'q' ? surf.qixCell(tg.ref) : tg.ref.c; }
+function tgCell(tg) { return tg.type === 'p' ? player.c : tg.type === 'r' ? tg.ref.c : tg.type === 'q' ? surf.qixCell(tg.ref) : tg.ref.c; }   // i(インクイ)・s(バチッコ)は .c
 function tgAlive(tg) {
   if (tg.type === 'p') return deathTimer <= 0 && !player.out && state === 'play';
   if (tg.type === 'r') return tg.ref.dead <= 0 && !tg.ref.out;
   if (tg.type === 'q') return qixes.includes(tg.ref);
+  if (tg.type === 'i') return invaders.includes(tg.ref);
   return sparxes.includes(tg.ref);
 }
 function tgScreen(tg) {
@@ -6606,8 +6638,8 @@ function updateTowers(dt) {
   }
 }
 // ---- 自動で塗る(近くに敵がいないとき) ----
-const TOWER_PAINT_CD = [2.6, 2.4, 2.2, 2.0, 1.9, 1.8, 1.6];   // 次に塗るまでの秒
-const TOWER_PAINT_R = [1, 1, 2, 2, 2, 3, 3];                    // 1回に塗る半径(マス)
+const TOWER_PAINT_CD = [5.2, 4.8, 4.4, 4.0, 3.7, 3.4, 3.0];   // 次に塗るまでの秒
+const TOWER_PAINT_R = [1, 1, 1, 2, 2, 2, 3];                    // 1回に塗る半径(マス)
 function towerPaintRad(T) { return Math.max(1, Math.round(TOWER_PAINT_R[T.lv] * towerScale())); }
 function nearQix(c, r) { return qixes.some(q => cellDist(c, surf.qixCell(q)) < r); }
 function touchesTeam(c, team) {
@@ -6650,6 +6682,7 @@ function paintSplat(c1, rad, T) {
     else if (colA[c] === 0 && !other) colA[c] = teamNo(T.team);
   }
   recountAreas(); fieldDirty = true; lineCacheT = -99;
+  if (invaders.length) crushInvaders(T.own);
   // 足場が陣地の中になった人は、近くの線へ
   if (!player.drawing && deathTimer <= 0 && !isBoundary(player.c)) snapPlayerToBoundary();
   for (const r of rivals) if (!r.drawing && r.dead <= 0 && !(r.overT > 0) && !isBoundary(r.c)) snapActor(r);
@@ -6747,6 +6780,7 @@ function hurtTarget(tg, dmg, T) {
   if (!tgAlive(tg)) return;
   const P = tgScreen(tg), vis = !surf.is3D || visA[tgCell(tg)];
   if (vis) spawnParticles(P.x, P.y, 6, teamHex(T.team));
+  if (tg.type === 'i') { tg.ref.hp -= dmg; if (tg.ref.hp <= 0) killInvader(tg.ref, T.own); return; }   // インクイ
   if (tg.type === 'q') { tg.ref.stun = 2.5; if (vis) rings.push({ x: P.x, y: P.y, t: 0.3, col: '#9fe3ff' }); return; }     // ヌメリンはしびれる
   if (tg.type === 's') { sparxes.splice(sparxes.indexOf(tg.ref), 1); if (vis) spawnParticles(P.x, P.y, 16, '#ff7a4a'); return; }   // バチッコは消える
   const f = tg.ref;
@@ -6963,6 +6997,7 @@ function glowDot(x, y, r, col, a) {
 function drawTower(T, x, y, s) {
   const big = T.lv === 6 ? 1.25 : T.lv >= 4 ? 1.1 : 1, R = (surf.is3D ? 16 : 21) * s * big;
   drawTowerArt(T, x, y, R, Math.min(1, T.build / BUILD_T));
+  drawTowerHp(T, x, y, R);
 }
 
 function drawShots() {
@@ -7026,6 +7061,217 @@ function drawHpBars() {
     ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(x - 1, y - 1, w + 2, 5);
     ctx.fillStyle = hp <= 2 ? '#ff5c5c' : e.col; ctx.fillRect(x, y, w * Math.max(0, hp) / FIGHTER_HP, 3);
   }
+}
+
+
+/* =====================================================================
+   侵略ウェーブ: 一定時間ごとに侵略者「インクイ」の群れが湧き、陣地をかじりながら進んでくる
+   - インクイは空き地を歩く。陣地(壁)にぶつかると、そのマスをかじって空き地に戻してから進む(claimed を減らす)
+   - ねらうのは陣地の広い人ほど多い。その人のタワーがあればタワーへ、なければ陣地の奥へ
+   - タワーの足もとはかじれない(かわりにタワーを攻撃する)。描きかけの線を踏むと線が切れて、描いていた人はやられる
+   - タワーは設定に関係なくインクイをねらう。インクイのいる空き地を囲むか、タワーのインクで塗ると退治できる
+   ===================================================================== */
+const WAVE_FIRST = 12, WAVE_EVERY = 18, WAVE_WARN = 3, INV_CHEW = 0.3;
+let invaders = [], waveT = WAVE_FIRST, waveN = 0, waveSpawns = null;
+function invaderNear(c, d) { return invaders.some(v => cellDist(v.c, c) < d * towerScale()); }
+function invasionOn() { return isVS() && settings.invasion !== 'OFF'; }
+function invSpeed() { return 4.5 * towerScale(); }                // マス/秒
+function invHpMax() { return 4 + Math.round(waveN * 1.5); }
+// 出てくる場所: 空き地のうち、ファイターから離れた、なるべくふち寄りのマス
+function pickSpawns(n) {
+  const fighters = [player.c].concat(rivals.filter(r => r.dead <= 0).map(r => r.c)), cand = [];
+  for (let i = 0; i < surf.N; i += 3) {
+    if (grid[i] !== OPEN || nearQix(i, 4)) continue;
+    let edge = false; for (let k = 0; k < 4; k++) { const b = surf.nb[i * 4 + k]; if (b < 0 || baseA[b]) edge = true; }
+    if (!edge && !surf.is3D) continue;
+    if (fighters.some(f => cellDist(f, i) < 10 * towerScale())) continue;
+    cand.push(i);
+  }
+  if (!cand.length) return [];
+  const g = Math.min(3, 1 + (waveN >> 1)), heads = [];                 // 2〜3か所からまとまって出る
+  for (let k = 0; k < g; k++) heads.push(pick(cand));
+  return Array.from({ length: n }, (_, i) => heads[i % heads.length]);
+}
+function updateInvaders(dt) {
+  if (!invasionOn() || state !== 'play') return;
+  // ウェーブの時計
+  waveT -= dt;
+  if (waveT <= WAVE_WARN && !waveSpawns) {
+    waveSpawns = pickSpawns(Math.min(34, 6 + waveN * 3));
+    if (waveSpawns.length) Snd.fuseCr();
+  }
+  if (waveT <= 0) {
+    waveN++;
+    const hp = invHpMax();
+    (waveSpawns || []).forEach((c, i) => {
+      if (grid[c] !== OPEN) return;
+      const boss = waveN % 3 === 0 && i === 0;               // 3回に1回はボス(大きくて硬い、ひと口が大きい)
+      invaders.push({ c, prev: -1, acc: rand(0, 1), hp: hp * (boss ? 4 : 1), hpMax: hp * (boss ? 4 : 1), boss, chew: 0, tgt: null, retarget: 0, ph: rand(0, 6), look: 1 });
+    });
+    fxBanner = { txt: '侵略ウェーブ ' + waveN + '!', sub: 'インクイ ×' + (waveSpawns || []).length, col: '#9b5cff', t: 1.6, T: 1.6, big: false };
+    Snd.big();
+    waveSpawns = null; waveT = WAVE_EVERY;
+  }
+  // 動く・かじる
+  const spd = invSpeed();
+  for (const v of invaders.slice()) {
+    v.ph += dt * 6;
+    if (v.chew > 0) {                                  // かじっている最中
+      v.chew -= dt;
+      if (v.chew <= 0) chewCell(v, v.chewC);
+      continue;
+    }
+    v.retarget -= dt;
+    if (v.retarget <= 0 || !invTargetOk(v)) { invPickTarget(v); v.retarget = 3; }
+    v.acc += dt * spd;
+    while (v.acc >= 1 && v.chew <= 0) {
+      v.acc -= 1;
+      const n = invNext(v);
+      if (n < 0) { v.acc = 0; break; }
+      if (grid[n] === TRAIL) { if (player.drawing && !(player.invuln > 0)) death('インクイに線を踏まれた'); v.prev = v.c; v.c = n; break; }
+      if (grid[n] === RTRAIL) { const o = rivals[rtOwn[n] - 1]; if (o && o.drawing) rivalFail(o, 'invader'); v.prev = v.c; v.c = n; break; }
+      if (grid[n] === WALL) {                         // 陣地: タワーの足もとならタワーを攻撃、ちがえばかじる
+        const T = towers.find(t => cellDist(n, t.c) <= TOWER_CORE);
+        if (T) { invHitTower(v, T, 1 / spd); break; }
+        v.chew = INV_CHEW; v.chewC = n; break;
+      }
+      v.prev = v.c; v.c = n;
+      const sx = surf.screenOf(n).x, s0 = surf.screenOf(v.prev).x; if (Math.abs(sx - s0) > 0.5) v.look = sx > s0 ? 1 : -1;
+    }
+  }
+}
+// ねらう相手: 陣地の広さで重みをつけて選ぶ(大きく取るほど狙われる)。その人のタワーか陣地の奥
+function invPickTarget(v) {
+  const own = [{ own: 1, area: playerArea() }].concat(rivals.map(r => ({ own: 2 + r.id, area: r.area }))).filter(o => o.area > 0);
+  if (!own.length) { v.tgt = null; return; }
+  // 広さの2乗で重み: トップを走る人ほど狙われる(守りが大事になり、逆転も起きやすい)
+  let tot = own.reduce((a, o) => a + o.area * o.area, 0), x = Math.random() * tot, who = own[0];
+  for (const o of own) { x -= o.area * o.area; if (x <= 0) { who = o; break; } }
+  const ts = towers.filter(t => t.own === who.own);
+  if (ts.length && Math.random() < 0.7) { v.tgt = { own: who.own, c: pick(ts).c }; return; }
+  let best = -1, bd = 1e9;
+  for (let k = 0; k < 120; k++) { const c = (Math.random() * surf.N) | 0; if (grid[c] === WALL && ownA[c] === who.own && !baseA[c]) { const d = cellDist(v.c, c); if (d < bd) { bd = d; best = c; } } }
+  v.tgt = best >= 0 ? { own: who.own, c: best } : null;
+}
+function invTargetOk(v) { return v.tgt && grid[v.tgt.c] === WALL && ownA[v.tgt.c] === v.tgt.own; }
+// 次のマス: ねらいに近づく隣(空き地・描きかけの線・かじれる陣地)。来たところには戻りにくい
+function invNext(v) {
+  const tc = v.tgt ? v.tgt.c : -1;
+  let best = -1, bs = 1e9;
+  for (let k = 0; k < 4; k++) {
+    const n = surf.nb[v.c * 4 + k];
+    if (n < 0 || baseA[n]) continue;
+    if (grid[n] === WALL && (n === player.c || rivals.some(r => r.c === n && r.dead <= 0))) continue;   // ファイターの立っているマスはかじらない
+    let sc = (tc >= 0 ? cellDist(n, tc) : 0) + rand(0, 0.9) + (n === v.prev ? 1.5 : 0) + (grid[n] === WALL ? 0.6 : 0);
+    if (sc < bs) { bs = sc; best = n; }
+  }
+  return best;
+}
+// かじる: 陣地のマスを空き地に戻す(占領数の整合を守る)。ふちは線にする
+function chewable(n) { return n >= 0 && grid[n] === WALL && !baseA[n] && n !== player.c && !rivals.some(r => r.c === n && r.dead <= 0) && !towers.some(t => cellDist(n, t.c) <= TOWER_CORE); }
+function chewCell(v, n) {
+  if (state !== 'play' || !chewable(n)) return;
+  const own = ownA[n];
+  // ひと口: ウェーブ2からは、かじったマスと上下左右。ボスはもうひとまわり
+  const bite = [n];
+  if (waveN >= 2 || v.boss) for (let k = 0; k < 4; k++) { const b = surf.nb[n * 4 + k]; if (chewable(b)) bite.push(b); }
+  if (v.boss) for (const b of bite.slice(1)) for (let k = 0; k < 4; k++) { const e = surf.nb[b * 4 + k]; if (chewable(e) && !bite.includes(e)) bite.push(e); }
+  for (const c of bite) { grid[c] = OPEN; colA[c] = 0; mixA[c] = 0; ownA[c] = 0; claimed--; }
+  v.prev = v.c; v.c = n;
+  for (const c of bite.slice(1)) for (let m = 0; m < 8; m++) { const b = surf.nb8[c * 8 + m]; if (b >= 0 && grid[b] === WALL && !baseA[b] && colA[b] && colA[b] !== HOME_COL) { colA[b] = 0; mixA[b] = 0; } }
+  // まわりの陣地のふちを線に(ネオンのふちが途切れないように)
+  for (let m = 0; m < 8; m++) {
+    const b = surf.nb8[n * 8 + m];
+    if (b >= 0 && grid[b] === WALL && !baseA[b] && colA[b] && colA[b] !== HOME_COL) { colA[b] = 0; mixA[b] = 0; }
+  }
+  recountAreas(); fieldDirty = true; lineCacheT = -99;
+  if (!player.drawing && deathTimer <= 0 && !isBoundary(player.c)) snapPlayerToBoundary();
+  for (const r of rivals) if (!r.drawing && r.dead <= 0 && !(r.overT > 0) && !isBoundary(r.c)) snapActor(r);
+  for (const sp of sparxes) if (!isBoundary(sp.c)) snapActor(sp);
+  const p = surf.screenOf(n);
+  if (!surf.is3D || visA[n]) particles.push({ x: p.x, y: p.y, vx: rand(-30, 30), vy: rand(-50, -10), t: 0.4, col: own >= 1 ? teamHex(Math.max(0, ownerTeam(own))) : '#888', ink: true, r: 2 });
+}
+// タワーを攻撃(足もとに着いたインクイ)
+function towerHpMax(T) { return 6 + T.lv * 3; }
+function invHitTower(v, T, dt) {
+  if (T.hp == null) T.hp = towerHpMax(T);
+  T.hp -= 1; v.chew = INV_CHEW * 1.5; v.chewC = -1; T.hurtT = blinkT;
+  const p = towerScreen(T);
+  if (towerVisible(T)) spawnParticles(p.x, p.y, 4, '#b98cff');
+  if (T.hp <= 0) removeTower(T, true);
+}
+// インクイがいる空き地が陣地になった(囲まれた・塗られた)ら退治。by = 手柄の持ち主(own)
+function crushInvaders(by) {
+  for (const v of invaders.slice()) if (grid[v.c] === WALL && v.chew <= 0) killInvader(v, by);
+}
+function killInvader(v, by) {
+  const i = invaders.indexOf(v);
+  if (i < 0) return;
+  invaders.splice(i, 1);
+  const p = surf.screenOf(v.c);
+  if (!surf.is3D || visA[v.c]) { spawnParticles(p.x, p.y, 16, '#b98cff'); rings.push({ x: p.x, y: p.y, t: 0.4, col: '#9b5cff' }); }
+  if (by === 1) { score += 300; vsStat.repel = (vsStat.repel || 0) + 1; if (vsStat.repel >= 10) unlock('repel'); }
+  Snd.splat(0.08);
+}
+
+// ---- 描画 ----
+function drawInvaders() {
+  if (lapsePlay || !invaders.length) return;
+  const s = surf.is3D ? 1 : sprK();
+  for (const v of invaders) {
+    if (surf.is3D && visA.length === surf.N && !visA[v.c]) continue;
+    const p = surf.screenOf(v.c);
+    drawInkui(p.x, p.y, s, v);
+  }
+}
+// インクイ: 紫のとげとげの体に、光る黄色い目と白い歯。足をちょこちょこ動かす(点滅なし)
+function drawInkui(x, y, s, v) {
+  const R = (v.boss ? 17 : 10) * s, sq = v.chew > 0 ? 0.85 + 0.15 * Math.sin(v.ph * 3) : 1, bob = Math.sin(v.ph) * 1.2 * s;
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.beginPath(); ctx.ellipse(x + 2, y + R * 0.55, R * 1.1, R * 0.45, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.save(); ctx.translate(x, y - R * 0.5 + bob); ctx.scale(v.look < 0 ? -1 : 1, sq);
+  // 足
+  ctx.strokeStyle = '#1a0d28'; ctx.lineWidth = Math.max(1.2, 1.6 * s);
+  for (let i = 0; i < 4; i++) { const a = Math.sin(v.ph * 2 + i * 1.6) * 0.4, lx = -R * 0.6 + i * R * 0.4; ctx.beginPath(); ctx.moveTo(lx, R * 0.4); ctx.lineTo(lx + Math.sin(a) * R * 0.3, R * 0.95); ctx.stroke(); }
+  // 体(とげの輪郭)
+  const g = ctx.createRadialGradient(-R * 0.3, -R * 0.4, R * 0.1, 0, 0, R * 1.2);
+  g.addColorStop(0, '#b77bff'); g.addColorStop(0.6, '#5b2a92'); g.addColorStop(1, '#2a1147');
+  ctx.fillStyle = g; ctx.beginPath();
+  for (let i = 0; i < 14; i++) { const a = i / 14 * Math.PI * 2, r = R * (i % 2 ? 0.86 : 1.08); ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r * 0.85); }
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = '#0c0514'; ctx.lineWidth = Math.max(1, 1.3 * s); ctx.stroke();
+  // 目と口
+  for (const ex of [-0.32, 0.3]) {
+    ctx.fillStyle = '#ffd23a'; ctx.beginPath(); ctx.ellipse(R * ex, -R * 0.18, R * 0.2, R * 0.24, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#1a0a00'; ctx.beginPath(); ctx.arc(R * ex + R * 0.06, -R * 0.14, R * 0.09, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.fillStyle = '#12061e'; ctx.beginPath(); ctx.ellipse(0, R * 0.32, R * 0.42, R * (v.chew > 0 ? 0.26 : 0.14), 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#ffffff'; for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(i * R * 0.15 - R * 0.05, R * 0.22); ctx.lineTo(i * R * 0.15 + R * 0.05, R * 0.22); ctx.lineTo(i * R * 0.15, R * 0.34); ctx.fill(); }
+  ctx.restore();
+  if (v.hp < v.hpMax) {                               // 体力
+    const w = R * 2.2;
+    ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(x - w / 2 - 1, y - R * 1.9 - 1, w + 2, 4);
+    ctx.fillStyle = '#c38bff'; ctx.fillRect(x - w / 2, y - R * 1.9, w * Math.max(0, v.hp) / v.hpMax, 2);
+  }
+}
+// ウェーブの前ぶれ: 出てくる場所にゆっくり広がる輪(点滅なし)
+function drawWaveWarn() {
+  if (!waveSpawns || !waveSpawns.length || lapsePlay) return;
+  const k = clamp(1 - waveT / WAVE_WARN, 0, 1), seen = new Set();
+  for (const c of waveSpawns) {
+    if (seen.has(c)) continue; seen.add(c);
+    if (surf.is3D && visA.length === surf.N && !visA[c]) continue;
+    const p = surf.screenOf(c), ph = (blinkT * 0.8) % 1;
+    ctx.strokeStyle = rgbaHex('#9b5cff', 0.8 * (1 - ph)); ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 8 + ph * 34, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = rgbaHex('#9b5cff', 0.25 + 0.35 * k); ctx.beginPath(); ctx.arc(p.x, p.y, 7 + 5 * k, 0, Math.PI * 2); ctx.fill();
+  }
+}
+// タワーの体力のバー(インクイに攻撃されているとき)
+function drawTowerHp(T, x, y, R) {
+  if (T.hp == null || T.hp >= towerHpMax(T)) return;
+  const w = R * 1.6, f = Math.max(0, T.hp) / towerHpMax(T);
+  ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(x - w / 2 - 1, y + R * 0.9 - 1, w + 2, 5);
+  ctx.fillStyle = f < 0.35 ? '#ff5c5c' : '#9dffea'; ctx.fillRect(x - w / 2, y + R * 0.9, w * f, 3);
 }
 
 /* ---- 陣地が確定したときの演出: 一度に囲んだ広さで段階が上がる(光らせる・点滅はしない) ----

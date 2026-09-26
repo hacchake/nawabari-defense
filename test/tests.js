@@ -1745,5 +1745,56 @@ for (const mode of ['SPHERE', 'CUBE', 'TORUS', 'KLEIN']) {
   settings.stageSel = 'TOUR'; settings.vsCpu = 'AUTO';
 }
 
+// ---- 119) 侵略ウェーブ(インクイ) ----
+{
+  const openN = () => { let n = 0; for (let i = 0; i < surf.N; i++) if (grid[i] === OPEN) n++; return n; };
+  for (const sk of ['PLANE', 'CUBE']) {
+    settings.mode = 'VS'; settings.stageSel = sk; settings.vsCpu = '3'; settings.invasion = 'ON'; startGame(); setState('play');
+    player.invuln = 1e9; for (const r of rivals) r.dead = 1e9;
+    // 自機の陣地(タワーなし)
+    const cells = []; for (let i = 0; i < surf.N && cells.length < initOpen * 0.2; i++) if (grid[i] === OPEN && !nearQix(i, 6)) { grid[i] = WALL; ownA[i] = 1; colA[i] = teamNo(0); cells.push(i); }
+    claimed += cells.length; recountAreas();
+    for (let i = 0; i < 60 * (WAVE_FIRST - WAVE_WARN) + 30; i++) { blinkT += 1 / 60; updateInvaders(1 / 60); }
+    assert(sk + ': ウェーブの前ぶれ(出てくる場所)', !!waveSpawns && waveSpawns.length > 0 && invaders.length === 0);
+    for (let i = 0; i < 60 * 3; i++) { blinkT += 1 / 60; updateInvaders(1 / 60); }
+    assert(sk + ': ウェーブ1でインクイが来る', waveN === 1 && invaders.length >= 5 && invaders.every(v => grid[v.c] === OPEN || grid[v.c] === TRAIL), invaders.length);
+    const a0 = playerArea();
+    let err = null;
+    try { for (let i = 0; i < 60 * 60 && playerArea() >= a0; i++) { blinkT += 1 / 60; updateInvaders(1 / 60); } render(); } catch (e) { err = e.stack; }
+    assert(sk + ': インクイが陣地をかじる(タワーがないと減る)', !err && playerArea() < a0, err || (a0 + '→' + playerArea()));
+    assert(sk + ': かじっても占領数の整合がくずれない', claimed === initOpen - openN() - trail.length - rivalTrailCells(), claimed + ' vs ' + (initOpen - openN()));
+    // タワーはインクイを撃つ(設定が「ファイターだけ」でも)
+    settings.towerTarget = 'FIGHTERS';
+    const T = buildTowerFor(cells.filter(c => grid[c] === WALL), 1, 0); T.build = BUILD_T;
+    const v = invaders[0]; v.c = surf.nb[T.c * 4] >= 0 ? T.c : T.c;
+    assert(sk + ': タワーはインクイをねらう', towerEnemies(T).some(tg => tg.type === 'i'));
+    const hurt0 = v.hp; hurtTarget({ type: 'i', ref: v }, 1, T);
+    assert(sk + ': 撃たれるとインクイの体力が減る', v.hp === hurt0 - 1);
+    hurtTarget({ type: 'i', ref: v }, 99, T);
+    assert(sk + ': 体力が0で退治', !invaders.includes(v));
+    // 空き地ごと囲むと退治
+    const w = invaders[0]; grid[w.c] = WALL; ownA[w.c] = 1; colA[w.c] = teamNo(0); claimed++; const k0 = vsStat.repel || 0;
+    crushInvaders(1);
+    assert(sk + ': 囲まれたインクイは退治(自分の手柄)', !invaders.includes(w) && (vsStat.repel || 0) === k0 + 1);
+    // 描きかけの線を踏まれるとやられる
+    player.invuln = 0; deathTimer = 0;
+    const x = invaders[0];
+    if (x) {
+      const n = [0, 1, 2, 3].map(k => surf.nb[x.c * 4 + k]).find(b => b >= 0 && grid[b] === OPEN);
+      if (n != null) { grid[n] = TRAIL; trail = [n]; player.drawing = true; x.tgt = null; x.prev = -1; x.acc = 5;
+        const in0 = invNext; invNext = vv => vv === x ? n : in0(vv);
+        for (let i = 0; i < 30 && deathTimer <= 0 && x.c !== n; i++) updateInvaders(1 / 60);
+        invNext = in0;
+        assert(sk + ': インクイに描きかけの線を踏まれるとやられる', deathTimer > 0 && /インクイ/.test(lastDeath), lastDeath);
+        while (deathTimer > 0) update(1 / 60);
+      }
+    }
+  }
+  settings.invasion = 'OFF'; startGame(); setState('play');
+  for (let i = 0; i < 60 * (WAVE_FIRST + 2); i++) { blinkT += 1 / 60; updateInvaders(1 / 60); }
+  assert('侵略ウェーブ OFF なら来ない', invaders.length === 0 && waveN === 0);
+  settings.invasion = 'ON'; settings.stageSel = 'TOUR'; settings.vsCpu = 'AUTO';
+}
+
 console.log(fails === 0 ? '\n=== 全テスト合格 ===' : '\n=== 失敗 ' + fails + ' 件 ===');
 process.exit(fails === 0 ? 0 : 1);
